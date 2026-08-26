@@ -111,24 +111,24 @@ const DEFAULTS: Settings = {
   angle: false,
   power: false,
   levels: false,
-  dynamicDanger: true,
-  theme: 'premiumJuice',
-  aimLength: 1700,
+  dynamicDanger: false,
+  theme: 'simpleJuice',
+  aimLength: 2000,
   bounces: true,
   sound: false,
   vibration: false,
   straightStabilizer: true,
-  straightLockDistance: 14,
+  straightLockDistance: 3,
   debugHitboxes: false,
   maxAngle: 85,
   fixedSpeed: 9,
-  minPower: 9,
-  maxPower: 20,
-  wallRest: 0.9,
-  frontRest: 0.08,
-  cupRest: 0.18,
-  drag: 0.989,
-  slope: 0.009,
+  minPower: 10,
+  maxPower: 16,
+  wallRest: 0.91,
+  frontRest: 0.12,
+  cupRest: 0.22,
+  drag: 0.994,
+  slope: 0.01,
   size: 1,
   throwThreshold: 65,
   gameOverMs: 1000,
@@ -352,27 +352,9 @@ export default function Home() {
 
   useEffect(() => {
     let loaded = DEFAULTS;
-    const raw = localStorage.getItem('juice-v41-settings');
+    const raw = localStorage.getItem('juice-v42-settings');
     if (raw) {
       try { loaded = { ...DEFAULTS, ...JSON.parse(raw) }; } catch { /* ignore */ }
-    } else {
-      const oldRaw = localStorage.getItem('juice-v4-settings');
-      if (oldRaw) {
-        try {
-          const old = JSON.parse(oldRaw) as Partial<Settings>;
-          loaded = { ...DEFAULTS,
-            theme: old.theme ?? DEFAULTS.theme,
-            angle: old.angle ?? DEFAULTS.angle,
-            power: old.power ?? DEFAULTS.power,
-            levels: old.levels ?? DEFAULTS.levels,
-            dynamicDanger: old.dynamicDanger ?? DEFAULTS.dynamicDanger,
-            aimLength: old.aimLength ?? DEFAULTS.aimLength,
-            bounces: old.bounces ?? DEFAULTS.bounces,
-            sound: old.sound ?? DEFAULTS.sound,
-            vibration: old.vibration ?? DEFAULTS.vibration,
-          };
-        } catch { /* ignore */ }
-      }
     }
     settingsRef.current = loaded;
     setSettings(loaded);
@@ -388,7 +370,7 @@ export default function Home() {
   useEffect(() => {
     settingsRef.current = settings;
     predictionRef.current.lastCalc = 0;
-    if (hydratedRef.current) localStorage.setItem('juice-v41-settings', JSON.stringify(settings));
+    if (hydratedRef.current) localStorage.setItem('juice-v42-settings', JSON.stringify(settings));
   }, [settings]);
 
   useEffect(() => {
@@ -424,7 +406,7 @@ export default function Home() {
   }, []);
 
   const radiusFor = useCallback((level: number) =>
-    22.8 * SIZE_CURVE[level] * roundSizeRef.current, []);
+    28.5 * SIZE_CURVE[level] * roundSizeRef.current, []);
 
   const award = useCallback((points: number) => {
     const next = scoreRef.current + points;
@@ -1069,8 +1051,8 @@ export default function Home() {
   const preset = (kind: 'stable' | 'balanced' | 'extreme') => {
     if (kind === 'stable') patchSettings({ wallRest: 0.72, cupRest: 0.1, drag: 0.982, slope: 0.012,
       fixedSpeed: 8, minPower: 7, maxPower: 14, sleepSpeed: 0.1, sleepDelayMs: 320 });
-    else if (kind === 'balanced') patchSettings({ wallRest: 0.9, cupRest: 0.18, drag: 0.989, slope: 0.009,
-      fixedSpeed: 9, minPower: 9, maxPower: 20, sleepSpeed: 0.08, sleepDelayMs: 420 });
+    else if (kind === 'balanced') patchSettings({ wallRest: 0.91, frontRest: 0.12, cupRest: 0.22, drag: 0.994, slope: 0.01,
+      size: 1, fixedSpeed: 9, minPower: 10, maxPower: 16, sleepSpeed: 0.08, sleepDelayMs: 420 });
     else patchSettings({ wallRest: 0.98, cupRest: 0.3, drag: 0.994, slope: 0.006,
       fixedSpeed: 10.5, minPower: 10, maxPower: 24, sleepSpeed: 0.045, sleepDelayMs: 650 });
   };
@@ -1121,7 +1103,8 @@ function Toggle({ title, note, value, onChange }: { title: string; note: string;
 }
 
 function Slider({ title, value, min, max, step = 1, unit = '', onChange }: { title: string; value: number; min: number; max: number; step?: number; unit?: string; onChange: (value: number) => void }) {
-  return <label className="slider-row"><span><b>{title}</b><output>{Number.isInteger(value) ? value : value.toFixed(2)}{unit}</output></span><input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))}/></label>;
+  const precision = Math.max(0, (String(step).split('.')[1] || '').length);
+  return <label className="slider-row"><span><b>{title}</b><output>{value.toFixed(precision)}{unit}</output></span><input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))}/></label>;
 }
 
 function ThemeButton({ value, current, title, patch }: { value: Theme; current: Theme; title: string; patch: (patch: Partial<Settings>) => void }) {
@@ -1140,7 +1123,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
       <div className="setting-group">
         <Toggle title="動態危險線" note="未融合會推進，融合與訂單會退回" value={settings.dynamicDanger} onChange={(v) => patch({ dynamicDanger: v })}/>
         <Toggle title="角度瞄準" note="杯子調位置、瞄準線調角度、二次滑動投擲" value={settings.angle} onChange={(v) => patch({ angle: v })}/>
-        <Toggle title="直線防手抖" note="直線模式達到距離後，隱形固定起點與方向" value={settings.straightStabilizer} onChange={(v) => patch({ straightStabilizer: v })}/>
+        <Toggle title="動態防手抖" note="直線模式達到距離後，隱形固定起點與方向" value={settings.straightStabilizer} onChange={(v) => patch({ straightStabilizer: v })}/>
         {settings.straightStabilizer && <Slider title="防手抖觸發距離" value={settings.straightLockDistance}
           min={0} max={40} step={1} unit="px" onChange={(v) => patch({ straightLockDistance: v })}/>}
         <Toggle title="力度控制" note="距離 70%＋平均速度 30%" value={settings.power} onChange={(v) => patch({ power: v })}/>
@@ -1154,7 +1137,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(v) => patch({ throwThreshold: v })}/>
       </div>
       <details className="developer"><summary>開發者專區 <span>調整遊戲手感</span></summary><div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復新版預設</button></div>
-        <Toggle title="顯示碰撞邊界" note="顯示杯子橢圓、左右護欄與終點牆" value={settings.debugHitboxes} onChange={(v) => patch({ debugHitboxes: v })}/><Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(v) => patch({ maxAngle: v })}/><Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(v) => patch({ fixedSpeed: v })}/><Slider title="左右牆反彈" value={settings.wallRest} min={0.1} max={0.98} step={0.01} onChange={(v) => patch({ wallRest: v })}/><Slider title="前方牆反彈" value={settings.frontRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ frontRest: v })}/><Slider title="杯子互撞反彈" value={settings.cupRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ cupRest: v })}/><Slider title="速度衰減" value={settings.drag} min={0.96} max={0.995} step={0.001} onChange={(v) => patch({ drag: v })}/><Slider title="斜坡重力" value={settings.slope} min={0} max={0.03} step={0.001} onChange={(v) => patch({ slope: v })}/><Slider title="休眠速度" value={settings.sleepSpeed} min={0.02} max={0.2} step={0.005} onChange={(v) => patch({ sleepSpeed: v })}/><Slider title="休眠等待" value={settings.sleepDelayMs} min={100} max={1200} step={20} unit="ms" onChange={(v) => patch({ sleepDelayMs: v })}/><Slider title="杯子尺寸（下一局）" value={settings.size} min={0.8} max={1.25} step={0.01} onChange={(v) => patch({ size: v })}/><Slider title="結束等待" value={settings.gameOverMs} min={300} max={2500} step={100} unit="ms" onChange={(v) => patch({ gameOverMs: v })}/><Slider title="爆炸範圍" value={settings.blastRadius} min={80} max={210} step={5} onChange={(v) => patch({ blastRadius: v })}/><Slider title="爆炸推力" value={settings.blastForce} min={1} max={8} step={0.2} onChange={(v) => patch({ blastForce: v })}/>
+        <Toggle title="顯示碰撞邊界" note="顯示杯子橢圓、左右護欄與終點牆" value={settings.debugHitboxes} onChange={(v) => patch({ debugHitboxes: v })}/><Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(v) => patch({ maxAngle: v })}/><Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(v) => patch({ fixedSpeed: v })}/><Slider title="左右牆反彈" value={settings.wallRest} min={0.1} max={0.98} step={0.01} onChange={(v) => patch({ wallRest: v })}/><Slider title="前方牆反彈" value={settings.frontRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ frontRest: v })}/><Slider title="杯子互撞反彈" value={settings.cupRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ cupRest: v })}/><Slider title="速度衰減" value={settings.drag} min={0.96} max={0.995} step={0.001} onChange={(v) => patch({ drag: v })}/><Slider title="斜坡重力" value={settings.slope} min={0} max={0.03} step={0.001} onChange={(v) => patch({ slope: v })}/><Slider title="休眠速度" value={settings.sleepSpeed} min={0.02} max={0.2} step={0.005} onChange={(v) => patch({ sleepSpeed: v })}/><Slider title="休眠等待" value={settings.sleepDelayMs} min={100} max={1200} step={20} unit="ms" onChange={(v) => patch({ sleepDelayMs: v })}/><Slider title="杯子尺寸（下一局）" value={settings.size} min={0.6} max={1.6} step={0.01} onChange={(v) => patch({ size: v })}/><Slider title="結束等待" value={settings.gameOverMs} min={300} max={2500} step={100} unit="ms" onChange={(v) => patch({ gameOverMs: v })}/><Slider title="爆炸範圍" value={settings.blastRadius} min={80} max={210} step={5} onChange={(v) => patch({ blastRadius: v })}/><Slider title="爆炸推力" value={settings.blastForce} min={1} max={8} step={0.2} onChange={(v) => patch({ blastForce: v })}/>
       </details>
     </div><div className="settings-actions"><button className="pause-action" onClick={pause}>暫停遊戲</button><button className={`restart-action ${confirmRestart ? 'confirm' : ''}`} onClick={() => { if (confirmRestart) restart(); else setConfirmRestart(true); }}>{confirmRestart ? '再次點擊確認重來' : '重新開始'}</button></div><button className="done-button" onClick={close}>完成並繼續</button>
   </section></div>;
