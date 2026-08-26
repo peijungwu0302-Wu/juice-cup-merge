@@ -9,7 +9,23 @@ const DYNAMIC_DANGER_START = WORLD_H - 140;
 // Dynamic mode may keep advancing until only the front pocket of the lane is safe.
 // Good merges buy room back, but a long run can no longer become effectively endless.
 const DYNAMIC_DANGER_MIN = WORLD_H - 580;
-const MERGE_SENSOR = 1.03;
+const MERGE_SENSOR = 1;
+const HISTORY_LIMIT = 300;
+
+// Every visual, rail and collision overlay is projected from these source-image anchors.
+const LANE_ART = {
+  width: 862,
+  height: 1825,
+  wallY: 358,
+  railHalf: [
+    [358, 151],
+    [600, 215],
+    [900, 303],
+    [1200, 388],
+    [1500, 472],
+    [1825, 560],
+  ] as Array<[number, number]>,
+};
 
 const LEVELS = [
   { name: '檸檬露', color: '#f8d53c', dark: '#c28a12' },
@@ -53,6 +69,13 @@ const SPRITE_BOUNDS: Partial<Record<Theme, Bounds[]>> = {
   ],
 };
 
+// Premium art is normalized visually to the same theme-independent physics diameter.
+const PREMIUM_VISUAL_SCALE: Partial<Record<Theme, number>> = {
+  premiumJuice: 1.16,
+  premiumSundae: 1.13,
+  premiumWine: 1.16,
+};
+
 type Settings = {
   angle: boolean;
   power: boolean;
@@ -63,6 +86,9 @@ type Settings = {
   bounces: boolean;
   sound: boolean;
   vibration: boolean;
+  straightStabilizer: boolean;
+  straightLockDistance: number;
+  debugHitboxes: boolean;
   maxAngle: number;
   fixedSpeed: number;
   minPower: number;
@@ -77,6 +103,8 @@ type Settings = {
   gameOverMs: number;
   blastRadius: number;
   blastForce: number;
+  sleepSpeed: number;
+  sleepDelayMs: number;
 };
 
 const DEFAULTS: Settings = {
@@ -89,13 +117,16 @@ const DEFAULTS: Settings = {
   bounces: true,
   sound: false,
   vibration: false,
+  straightStabilizer: true,
+  straightLockDistance: 14,
+  debugHitboxes: false,
   maxAngle: 85,
-  fixedSpeed: 8.5,
-  minPower: 6.5,
-  maxPower: 12.5,
-  wallRest: 0.84,
+  fixedSpeed: 9,
+  minPower: 9,
+  maxPower: 20,
+  wallRest: 0.9,
   frontRest: 0.08,
-  cupRest: 0.2,
+  cupRest: 0.18,
   drag: 0.989,
   slope: 0.009,
   size: 1,
@@ -103,6 +134,8 @@ const DEFAULTS: Settings = {
   gameOverMs: 1000,
   blastRadius: 138,
   blastForce: 4.2,
+  sleepSpeed: 0.08,
+  sleepDelayMs: 420,
 };
 
 type Cup = {
@@ -117,6 +150,8 @@ type Cup = {
   ageMs: number;
   safeExited: boolean;
   mergeLockMs: number;
+  sleeping: boolean;
+  sleepMs: number;
 };
 
 type Burst = { x: number; y: number; life: number; color: string; maxR: number };
@@ -148,6 +183,65 @@ type GameSnapshot = {
 };
 
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
+type LaneGeometry = {
+  cx: number;
+  farY: number;
+  nearY: number;
+  artScale: number;
+  artX: number;
+  artY: number;
+  visibleBottomSourceY: number;
+};
+
+const railHalfAtSourceY = (sourceY: number) => {
+  const points = LANE_ART.railHalf;
+  for (let index = 1; index < points.length; index += 1) {
+    const [y1, half1] = points[index];
+    const [y0, half0] = points[index - 1];
+    if (sourceY <= y1) {
+      const t = clamp((sourceY - y0) / Math.max(1, y1 - y0), 0, 1);
+      return half0 + (half1 - half0) * t;
+    }
+  }
+  return points[points.length - 1][1];
+};
+
+const laneGeometryFor = (w: number, h: number): LaneGeometry => {
+  // Reserve enough headroom for the tallest normalized glass at the far wall.
+  const farY = clamp(h * 0.17, 98, 132);
+  const artScale = Math.max(w / LANE_ART.width, (h - farY) / (LANE_ART.height - LANE_ART.wallY));
+  const artX = (w - LANE_ART.width * artScale) / 2;
+  const artY = farY - LANE_ART.wallY * artScale;
+  const nearY = h - 4;
+  const visibleBottomSourceY = clamp((nearY - artY) / artScale, LANE_ART.wallY, LANE_ART.height);
+  return { cx: w / 2, farY, nearY, artScale, artX, artY, visibleBottomSourceY };
+};
+
+const laneHalfAtWorldY = (y: number, geometry: LaneGeometry) => {
+  const t = clamp(y / WORLD_H, 0, 1);
+  const sourceY = LANE_ART.wallY + (geometry.visibleBottomSourceY - LANE_ART.wallY) * t;
+  return Math.min(railHalfAtSourceY(sourceY) * geometry.artScale, geometry.cx - 1);
+};
+
+const projectLane = (x: number, y: number, w: number, h: number) => {
+  const geometry = laneGeometryFor(w, h);
+  const t = clamp(y / WORLD_H, 0, 1);
+  const half = laneHalfAtWorldY(y, geometry);
+  return {
+    x: geometry.cx + (x / (WORLD_W / 2)) * half,
+    y: geometry.farY + (geometry.nearY - geometry.farY) * t,
+    scale: half / (WORLD_W / 2),
+    half,
+  };
+};
+
+const screenToWorldX = (screenX: number, y: number, width: number, height: number) => {
+  const geometry = laneGeometryFor(width, height);
+  const half = laneHalfAtWorldY(y, geometry);
+  return clamp(((screenX - geometry.cx) / Math.max(1, half)) * (WORLD_W / 2),
+    -WORLD_W / 2 + 31, WORLD_W / 2 - 31);
+};
+
 const isPremium = (theme: Theme) => theme.startsWith('premium');
 const simpleKind = (theme: Theme) =>
   theme.includes('Sundae') ? 'sundae' : theme.includes('Wine') ? 'wine' : 'juice';
@@ -161,6 +255,9 @@ export default function Home() {
   const idRef = useRef(1);
   const settingsRef = useRef<Settings>(DEFAULTS);
   const runningRef = useRef(true);
+  const pausedRef = useRef(false);
+  const manualPauseRef = useRef(false);
+  const roundSizeRef = useRef(DEFAULTS.size);
   const safeUntilRef = useRef(0);
   const lastShotRef = useRef(0);
   const dangerLineRef = useRef(DYNAMIC_DANGER_START);
@@ -187,6 +284,7 @@ export default function Home() {
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [gameOver, setGameOver] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [aimLocked, setAimLocked] = useState(false);
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(0);
@@ -224,6 +322,9 @@ export default function Home() {
     burstsRef.current = [];
     historyRef.current = [];
     runningRef.current = true;
+    pausedRef.current = false;
+    manualPauseRef.current = false;
+    roundSizeRef.current = active.size;
     safeUntilRef.current = 0;
     revivesRef.current = 0;
     bagRef.current = [];
@@ -245,14 +346,33 @@ export default function Home() {
     setUnlocked(0);
     setHistoryCount(0);
     setGameOver(false);
+    setPaused(false);
     setPowerPreview(0);
   }, [drawBag, resetAim]);
 
   useEffect(() => {
     let loaded = DEFAULTS;
-    const raw = localStorage.getItem('juice-v4-settings');
+    const raw = localStorage.getItem('juice-v41-settings');
     if (raw) {
       try { loaded = { ...DEFAULTS, ...JSON.parse(raw) }; } catch { /* ignore */ }
+    } else {
+      const oldRaw = localStorage.getItem('juice-v4-settings');
+      if (oldRaw) {
+        try {
+          const old = JSON.parse(oldRaw) as Partial<Settings>;
+          loaded = { ...DEFAULTS,
+            theme: old.theme ?? DEFAULTS.theme,
+            angle: old.angle ?? DEFAULTS.angle,
+            power: old.power ?? DEFAULTS.power,
+            levels: old.levels ?? DEFAULTS.levels,
+            dynamicDanger: old.dynamicDanger ?? DEFAULTS.dynamicDanger,
+            aimLength: old.aimLength ?? DEFAULTS.aimLength,
+            bounces: old.bounces ?? DEFAULTS.bounces,
+            sound: old.sound ?? DEFAULTS.sound,
+            vibration: old.vibration ?? DEFAULTS.vibration,
+          };
+        } catch { /* ignore */ }
+      }
     }
     settingsRef.current = loaded;
     setSettings(loaded);
@@ -268,8 +388,20 @@ export default function Home() {
   useEffect(() => {
     settingsRef.current = settings;
     predictionRef.current.lastCalc = 0;
-    if (hydratedRef.current) localStorage.setItem('juice-v4-settings', JSON.stringify(settings));
+    if (hydratedRef.current) localStorage.setItem('juice-v41-settings', JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    const pauseWhenHidden = () => {
+      if (!document.hidden || !runningRef.current) return;
+      manualPauseRef.current = true;
+      pausedRef.current = true;
+      setPaused(true);
+      setPowerPreview(0);
+    };
+    document.addEventListener('visibilitychange', pauseWhenHidden);
+    return () => document.removeEventListener('visibilitychange', pauseWhenHidden);
+  }, []);
 
   const signal = useCallback((strong = false) => {
     const active = settingsRef.current;
@@ -292,7 +424,7 @@ export default function Home() {
   }, []);
 
   const radiusFor = useCallback((level: number) =>
-    22.8 * SIZE_CURVE[level] * settingsRef.current.size, []);
+    22.8 * SIZE_CURVE[level] * roundSizeRef.current, []);
 
   const award = useCallback((points: number) => {
     const next = scoreRef.current + points;
@@ -338,7 +470,7 @@ export default function Home() {
       launchX: aimRef.current.x,
       revives: revivesRef.current,
     };
-    historyRef.current = [...historyRef.current, snapshot].slice(-2);
+    historyRef.current = [...historyRef.current, snapshot].slice(-HISTORY_LIMIT);
     setHistoryCount(historyRef.current.length);
   }, []);
 
@@ -363,7 +495,10 @@ export default function Home() {
     setRevives(snapshot.revives);
     setHistoryCount(historyRef.current.length);
     runningRef.current = true;
+    pausedRef.current = false;
+    manualPauseRef.current = false;
     setGameOver(false);
+    setPaused(false);
     safeUntilRef.current = performance.now() + 1000;
     lastShotRef.current = 0;
     resetAim(snapshot.launchX);
@@ -371,7 +506,7 @@ export default function Home() {
 
   const fire = useCallback((requestedPower: number) => {
     const now = performance.now();
-    if (!runningRef.current || now - lastShotRef.current < 50) return;
+    if (!runningRef.current || pausedRef.current || now - lastShotRef.current < 50) return;
     lastShotRef.current = now;
     pushHistory();
     const active = settingsRef.current;
@@ -384,7 +519,7 @@ export default function Home() {
       id: idRef.current++, x: aim.x, y: WORLD_H - 26,
       vx: Math.sin(aim.angle) * speed, vy: -Math.cos(aim.angle) * speed,
       level, r: radiusFor(level), dangerMs: 0, ageMs: 0,
-      safeExited: false, mergeLockMs: 0,
+      safeExited: false, mergeLockMs: 0, sleeping: false, sleepMs: 0,
     });
     if (active.dynamicDanger) {
       dangerLineRef.current = clamp(dangerLineRef.current - 9, DYNAMIC_DANGER_MIN, FIXED_DANGER);
@@ -410,6 +545,8 @@ export default function Home() {
       cup.ageMs = 1000;
       cup.safeExited = true;
       cup.vy -= 0.4;
+      cup.sleeping = false;
+      cup.sleepMs = 0;
     }
     revivesRef.current += 1;
     setRevives(revivesRef.current);
@@ -418,7 +555,10 @@ export default function Home() {
     }
     safeUntilRef.current = performance.now() + 3000;
     runningRef.current = true;
+    pausedRef.current = false;
+    manualPauseRef.current = false;
     setGameOver(false);
+    setPaused(false);
     resetAim(lastLaunchXRef.current);
   }, [resetAim]);
 
@@ -450,22 +590,15 @@ export default function Home() {
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
 
-    const geometry = () => {
-      const { w, h } = sizeRef.current;
-      return { cx: w / 2, farY: h * 0.195, nearY: h * 0.992, farHalf: w * 0.19, nearHalf: w * 0.495 };
-    };
     const project = (x: number, y: number) => {
-      const g = geometry();
-      const t = clamp(y / WORLD_H, 0, 1);
-      const half = g.farHalf + (g.nearHalf - g.farHalf) * t;
-      return { x: g.cx + (x / (WORLD_W / 2)) * half, y: g.farY + (g.nearY - g.farY) * t, scale: 0.58 + 0.42 * t };
+      const { w, h } = sizeRef.current;
+      return projectLane(x, y, w, h);
     };
-    const drawCover = (image: HTMLImageElement, w: number, h: number) => {
+    const drawLaneArt = (image: HTMLImageElement, w: number, h: number) => {
       if (!image.complete || !image.naturalWidth) return false;
-      const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
-      const sw = w / scale;
-      const sh = h / scale;
-      ctx.drawImage(image, (image.naturalWidth - sw) / 2, (image.naturalHeight - sh) / 2, sw, sh, 0, 0, w, h);
+      const geometry = laneGeometryFor(w, h);
+      ctx.drawImage(image, geometry.artX, geometry.artY,
+        image.naturalWidth * geometry.artScale, image.naturalHeight * geometry.artScale);
       return true;
     };
 
@@ -530,12 +663,13 @@ export default function Home() {
       const image = art[theme];
       const bounds = SPRITE_BOUNDS[theme]?.[cup.level];
       if (!image || !image.complete || !image.naturalWidth || !bounds) return false;
-      const p = project(cup.x, cup.y);
+      const projected = project(cup.x, cup.y);
+      const p = { ...projected, x: Math.round(projected.x * 2) / 2, y: Math.round(projected.y * 2) / 2 };
       const cellWidth = image.naturalWidth / 7;
       const [bx0, by0, bx1, by1] = bounds;
       const sourceW = bx1 - bx0;
       const sourceH = by1 - by0;
-      const visualWidth = cup.r * 2 * p.scale;
+      const visualWidth = cup.r * 2 * p.scale * (PREMIUM_VISUAL_SCALE[theme] ?? 1);
       const visualHeight = visualWidth * (sourceH / sourceW);
       ctx.drawImage(image, cup.level * cellWidth + bx0, by0, sourceW, sourceH,
         p.x - visualWidth / 2, p.y - visualHeight, visualWidth, visualHeight);
@@ -576,7 +710,8 @@ export default function Home() {
     };
 
     const drawSimpleCup = (cup: Cup, theme: Theme) => {
-      const p = project(cup.x, cup.y);
+      const projected = project(cup.x, cup.y);
+      const p = { ...projected, x: Math.round(projected.x * 2) / 2, y: Math.round(projected.y * 2) / 2 };
       const level = LEVELS[cup.level];
       const kind = simpleKind(theme);
       const w = cup.r * 2 * p.scale;
@@ -613,6 +748,40 @@ export default function Home() {
       const theme = settingsRef.current.theme;
       if (!isPremium(theme) || !drawPremiumCup(cup, theme)) drawSimpleCup(cup, theme);
     };
+    const drawCollisionFootprint = (cup: Cup, preview = false) => {
+      if (!settingsRef.current.debugHitboxes) return;
+      const p = project(cup.x, cup.y);
+      const radius = cup.r * p.scale;
+      ctx.save();
+      ctx.fillStyle = preview ? '#48d7ff22' : '#ffde5926';
+      ctx.strokeStyle = preview ? '#35d4ffdd' : '#ffcc3ddd';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - radius * 0.08, radius, Math.max(3, radius * 0.34), 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.setLineDash([]); ctx.restore();
+    };
+    const drawLaneDebug = () => {
+      if (!settingsRef.current.debugHitboxes) return;
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#24e0ffff';
+      ctx.setLineDash([6, 5]);
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        for (let index = 0; index <= 32; index += 1) {
+          const y = WORLD_H * index / 32;
+          const p = project(side * WORLD_W / 2, y);
+          if (index) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+        }
+        ctx.stroke();
+      }
+      const left = project(-WORLD_W / 2, 0), right = project(WORLD_W / 2, 0);
+      ctx.strokeStyle = '#ff6b4aff'; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(left.x, left.y); ctx.lineTo(right.x, right.y); ctx.stroke();
+      ctx.setLineDash([]); ctx.restore();
+    };
     const retreatDanger = (amount: number) => {
       if (!settingsRef.current.dynamicDanger) return;
       dangerLineRef.current = clamp(dangerLineRef.current + amount, DYNAMIC_DANGER_MIN, FIXED_DANGER);
@@ -625,7 +794,7 @@ export default function Home() {
       const active = settingsRef.current;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
-      const drewArt = art.lane ? drawCover(art.lane, w, h) : false;
+      const drewArt = art.lane ? drawLaneArt(art.lane, w, h) : false;
       if (!drewArt) {
         const fallback = ctx.createLinearGradient(0, 0, 0, h);
         fallback.addColorStop(0, '#9b6037'); fallback.addColorStop(0.22, '#efcf98'); fallback.addColorStop(1, '#f7e2b7');
@@ -635,85 +804,110 @@ export default function Home() {
       shade.addColorStop(0, '#3b1e0917'); shade.addColorStop(0.22, '#fff0'); shade.addColorStop(1, '#6e3d1010');
       ctx.fillStyle = shade; ctx.fillRect(0, 0, w, h);
 
-      if (runningRef.current) {
-        for (const cup of cupsRef.current) {
-          cup.ageMs += dt * 16.67;
-          cup.mergeLockMs = Math.max(0, cup.mergeLockMs - dt * 16.67);
-          cup.vy -= active.slope * dt;
-          const friction = Math.pow(active.drag, dt);
-          cup.vx *= friction; cup.vy *= friction; cup.x += cup.vx * dt; cup.y += cup.vy * dt;
-          if (cup.x - cup.r < -WORLD_W / 2) { cup.x = -WORLD_W / 2 + cup.r; cup.vx = Math.abs(cup.vx) * active.wallRest; }
-          else if (cup.x + cup.r > WORLD_W / 2) { cup.x = WORLD_W / 2 - cup.r; cup.vx = -Math.abs(cup.vx) * active.wallRest; }
-          if (cup.y - cup.r < 0) { cup.y = cup.r; cup.vy = Math.abs(cup.vy) * active.frontRest; cup.vx *= 0.88; }
-          if (cup.y + cup.r > WORLD_H) { cup.y = WORLD_H - cup.r; cup.vy = -Math.abs(cup.vy) * 0.08; }
-          if (cup.y + cup.r < dangerLineRef.current - 3) cup.safeExited = true;
-          const inDanger = cup.y + cup.r > dangerLineRef.current;
-          if ((cup.safeExited || cup.ageMs > 900) && inDanger) cup.dangerMs += dt * 16.67;
-          else cup.dangerMs = Math.max(0, cup.dangerMs - dt * 34);
-        }
-      }
-
-      const remove = new Set<number>();
-      const add: Cup[] = [];
-      const cups = cupsRef.current;
-      if (runningRef.current) {
-        for (let i = 0; i < cups.length; i += 1) for (let k = i + 1; k < cups.length; k += 1) {
-          const a = cups[i], b = cups[k];
-          if (remove.has(a.id) || remove.has(b.id)) continue;
-          const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy) || 0.01, min = a.r + b.r;
-          if (a.level === b.level && a.mergeLockMs <= 0 && b.mergeLockMs <= 0 && dist < min * MERGE_SENSOR) {
-            remove.add(a.id); remove.add(b.id);
-            const x = (a.x + b.x) / 2, y = (a.y + b.y) / 2;
-            const ma = a.r * a.r, mb = b.r * b.r, total = ma + mb;
-            if (a.level === 6) {
-              let cleared = 0;
-              for (const other of cups) {
-                if (remove.has(other.id)) continue;
-                const ex = other.x - x, ey = other.y - y, distance = Math.hypot(ex, ey) || 1;
-                if (distance >= active.blastRadius) continue;
-                if (other.level <= 2) { remove.add(other.id); cleared += 1; }
-                else if (other.level < 6) {
-                  const force = (1 - distance / active.blastRadius) * active.blastForce;
-                  other.vx += (ex / distance) * force; other.vy += (ey / distance) * force;
-                }
+      if (runningRef.current && !pausedRef.current) {
+        const movingMax = cupsRef.current.reduce((maximum, cup) =>
+          Math.max(maximum, Math.hypot(cup.vx, cup.vy)), 0);
+        const maxVelocity = movingMax;
+        const substeps = clamp(Math.ceil(maxVelocity * dt / 11), 1, 3);
+        const stepDt = dt / substeps;
+        for (let substep = 0; substep < substeps; substep += 1) {
+          for (const cup of cupsRef.current) {
+            cup.ageMs += stepDt * 16.67;
+            cup.mergeLockMs = Math.max(0, cup.mergeLockMs - stepDt * 16.67);
+            if (!cup.sleeping) {
+              cup.vy -= active.slope * stepDt;
+              const friction = Math.pow(active.drag, stepDt);
+              cup.vx *= friction; cup.vy *= friction;
+              cup.x += cup.vx * stepDt; cup.y += cup.vy * stepDt;
+              if (cup.x - cup.r < -WORLD_W / 2) {
+                cup.x = -WORLD_W / 2 + cup.r; cup.vx = Math.abs(cup.vx) * active.wallRest; cup.sleepMs = 0;
+              } else if (cup.x + cup.r > WORLD_W / 2) {
+                cup.x = WORLD_W / 2 - cup.r; cup.vx = -Math.abs(cup.vx) * active.wallRest; cup.sleepMs = 0;
               }
-              burstsRef.current.push({ x, y, life: 1, color: '#ffd75c', maxR: active.blastRadius });
-              award(5000 + cleared * 250); registerOrder(); retreatDanger(26); signal(true);
-            } else {
-              const nextLevel = a.level + 1;
-              add.push({ id: idRef.current++, x, y, vx: (a.vx * ma + b.vx * mb) / total,
-                vy: (a.vy * ma + b.vy * mb) / total, level: nextLevel, r: radiusFor(nextLevel),
-                dangerMs: 0, ageMs: Math.max(a.ageMs, b.ageMs), safeExited: a.safeExited || b.safeExited, mergeLockMs: 90 });
-              burstsRef.current.push({ x, y, life: 1, color: LEVELS[nextLevel].color, maxR: 52 });
-              award((nextLevel + 1) * 120);
-              unlockedRef.current = Math.max(unlockedRef.current, nextLevel); setUnlocked(unlockedRef.current);
-              // Every merge earns a little breathing room; only the level-7 blast
-              // creates a large reset, so ordinary chains cannot stall the danger line forever.
-              retreatDanger(2); signal(false);
+              if (cup.y - cup.r < 0) {
+                cup.y = cup.r; cup.vy = Math.abs(cup.vy) * active.frontRest; cup.vx *= 0.88;
+              }
+              if (cup.y + cup.r > WORLD_H) { cup.y = WORLD_H - cup.r; cup.vy = -Math.abs(cup.vy) * 0.08; }
+              const speed = Math.hypot(cup.vx, cup.vy);
+              if (speed < active.sleepSpeed) {
+                cup.sleepMs += stepDt * 16.67;
+                if (cup.sleepMs >= active.sleepDelayMs) {
+                  cup.sleeping = true; cup.vx = 0; cup.vy = 0;
+                }
+              } else cup.sleepMs = 0;
             }
-            continue;
+            if (cup.y + cup.r < dangerLineRef.current - 3) cup.safeExited = true;
+            const inDanger = cup.y + cup.r > dangerLineRef.current;
+            if ((cup.safeExited || cup.ageMs > 900) && inDanger) cup.dangerMs += stepDt * 16.67;
+            else cup.dangerMs = Math.max(0, cup.dangerMs - stepDt * 34);
           }
-          if (dist >= min) continue;
-          const nx = dx / dist, ny = dy / dist, overlap = min - dist;
-          const ma = a.r * a.r, mb = b.r * b.r, total = ma + mb;
-          a.x -= nx * overlap * (mb / total); a.y -= ny * overlap * (mb / total);
-          b.x += nx * overlap * (ma / total); b.y += ny * overlap * (ma / total);
-          const normalVelocity = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-          if (normalVelocity < 0) {
-            const impulse = -(1 + active.cupRest) * normalVelocity / (1 / ma + 1 / mb);
-            a.vx -= impulse * nx / ma; a.vy -= impulse * ny / ma; b.vx += impulse * nx / mb; b.vy += impulse * ny / mb;
+
+          const remove = new Set<number>();
+          const add: Cup[] = [];
+          const cups = cupsRef.current;
+          for (let i = 0; i < cups.length; i += 1) for (let k = i + 1; k < cups.length; k += 1) {
+            const a = cups[i], b = cups[k];
+            if (remove.has(a.id) || remove.has(b.id)) continue;
+            const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy) || 0.01, min = a.r + b.r;
+            if (a.level === b.level && a.mergeLockMs <= 0 && b.mergeLockMs <= 0 && dist < min * MERGE_SENSOR) {
+              remove.add(a.id); remove.add(b.id);
+              const x = (a.x + b.x) / 2, y = (a.y + b.y) / 2;
+              const ma = a.r * a.r, mb = b.r * b.r, total = ma + mb;
+              if (a.level === 6) {
+                let cleared = 0;
+                for (const other of cups) {
+                  if (remove.has(other.id)) continue;
+                  const ex = other.x - x, ey = other.y - y, distance = Math.hypot(ex, ey) || 1;
+                  if (distance >= active.blastRadius) continue;
+                  if (other.level <= 2) { remove.add(other.id); cleared += 1; }
+                  else if (other.level < 6) {
+                    const force = (1 - distance / active.blastRadius) * active.blastForce;
+                    other.vx += (ex / distance) * force; other.vy += (ey / distance) * force;
+                    other.sleeping = false; other.sleepMs = 0;
+                  }
+                }
+                burstsRef.current.push({ x, y, life: 1, color: '#ffd75c', maxR: active.blastRadius });
+                award(5000 + cleared * 250); registerOrder(); retreatDanger(26); signal(true);
+              } else {
+                const nextLevel = a.level + 1;
+                add.push({ id: idRef.current++, x, y, vx: (a.vx * ma + b.vx * mb) / total,
+                  vy: (a.vy * ma + b.vy * mb) / total, level: nextLevel, r: radiusFor(nextLevel),
+                  dangerMs: 0, ageMs: Math.max(a.ageMs, b.ageMs), safeExited: a.safeExited || b.safeExited,
+                  mergeLockMs: 90, sleeping: false, sleepMs: 0 });
+                burstsRef.current.push({ x, y, life: 1, color: LEVELS[nextLevel].color, maxR: 52 });
+                award((nextLevel + 1) * 120);
+                unlockedRef.current = Math.max(unlockedRef.current, nextLevel); setUnlocked(unlockedRef.current);
+                retreatDanger(2); signal(false);
+              }
+              continue;
+            }
+            if (dist >= min) continue;
+            const nx = dx / dist, ny = dy / dist, overlap = min - dist;
+            const ma = a.r * a.r, mb = b.r * b.r, total = ma + mb;
+            if (overlap > 0.02) {
+              a.sleeping = false; b.sleeping = false; a.sleepMs = 0; b.sleepMs = 0;
+            }
+            a.x -= nx * overlap * (mb / total); a.y -= ny * overlap * (mb / total);
+            b.x += nx * overlap * (ma / total); b.y += ny * overlap * (ma / total);
+            const normalVelocity = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+            if (normalVelocity < 0) {
+              const impulse = -(1 + active.cupRest) * normalVelocity / (1 / ma + 1 / mb);
+              a.vx -= impulse * nx / ma; a.vy -= impulse * ny / ma;
+              b.vx += impulse * nx / mb; b.vy += impulse * ny / mb;
+            }
+          }
+          if (remove.size) {
+            cupsRef.current = cupsRef.current.filter((cup) => !remove.has(cup.id)).concat(add);
+            predictionRef.current.lastCalc = 0;
           }
         }
-      }
-      if (remove.size) {
-        cupsRef.current = cupsRef.current.filter((cup) => !remove.has(cup.id)).concat(add);
-        predictionRef.current.lastCalc = 0;
       }
 
       const lineLeft = project(-WORLD_W / 2, dangerLineRef.current), lineRight = project(WORLD_W / 2, dangerLineRef.current);
       const pulse = 0.55 + Math.sin(now / 130) * 0.22;
       ctx.strokeStyle = now < safeUntilRef.current ? '#43bf7cca' : `rgba(221,67,50,${pulse})`;
       ctx.lineWidth = 2; ctx.setLineDash([8, 7]); ctx.beginPath(); ctx.moveTo(lineLeft.x, lineLeft.y); ctx.lineTo(lineRight.x, lineRight.y); ctx.stroke(); ctx.setLineDash([]);
+      drawLaneDebug();
 
       recalcPrediction(now);
       if (runningRef.current && active.aimLength > 0) {
@@ -725,18 +919,22 @@ export default function Home() {
         });
         ctx.setLineDash([]);
       }
-      [...cupsRef.current].sort((a, b) => a.y - b.y).forEach(drawCup);
+      const sortedCups = [...cupsRef.current].sort((a, b) => a.y - b.y);
+      sortedCups.forEach(drawCup);
+      sortedCups.forEach((cup) => drawCollisionFootprint(cup));
       for (const burst of burstsRef.current) {
-        burst.life -= 0.035 * dt; const p = project(burst.x, burst.y); const radius = (1 - burst.life) * burst.maxR * p.scale;
+        if (!pausedRef.current) burst.life -= 0.035 * dt;
+        const p = project(burst.x, burst.y); const radius = (1 - burst.life) * burst.maxR * p.scale;
         ctx.globalAlpha = Math.max(0, burst.life); ctx.strokeStyle = burst.color; ctx.lineWidth = 6;
         ctx.beginPath(); ctx.arc(p.x, p.y - radius * 0.2, radius, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
       }
       burstsRef.current = burstsRef.current.filter((burst) => burst.life > 0);
 
       if (runningRef.current) {
-        drawCup({ id: -1, x: aimRef.current.x, y: WORLD_H - 18, vx: 0, vy: 0,
+        const previewCup: Cup = { id: -1, x: aimRef.current.x, y: WORLD_H - 18, vx: 0, vy: 0,
           level: queueRef.current[0], r: radiusFor(queueRef.current[0]), dangerMs: 0,
-          ageMs: 0, safeExited: false, mergeLockMs: 0 });
+          ageMs: 0, safeExited: false, mergeLockMs: 0, sleeping: false, sleepMs: 0 };
+        drawCup(previewCup); drawCollisionFootprint(previewCup, true);
         if (active.angle) {
           const base = project(aimRef.current.x, WORLD_H - 18), length = 68;
           const hx = base.x + Math.sin(aimRef.current.angle) * length, hy = base.y - Math.cos(aimRef.current.angle) * length;
@@ -744,7 +942,7 @@ export default function Home() {
           ctx.beginPath(); ctx.arc(hx, hy, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         }
       }
-      if (runningRef.current && performance.now() > safeUntilRef.current && cupsRef.current.some((cup) => cup.dangerMs >= active.gameOverMs)) {
+      if (runningRef.current && !pausedRef.current && performance.now() > safeUntilRef.current && cupsRef.current.some((cup) => cup.dangerMs >= active.gameOverMs)) {
         runningRef.current = false; setGameOver(true); signal(true);
       }
       raf = requestAnimationFrame(loop);
@@ -752,9 +950,6 @@ export default function Home() {
     raf = requestAnimationFrame(loop);
     return () => { cancelAnimationFrame(raf); observer.disconnect(); };
   }, [award, radiusFor, registerOrder, signal]);
-
-  const worldXFromScreen = (screenX: number, width: number) => clamp(
-    ((screenX - width / 2) / (width * 0.495)) * (WORLD_W / 2), -WORLD_W / 2 + 31, WORLD_W / 2 - 31);
 
   const powerFromGesture = (gesture: Gesture, releaseY: number) => {
     const active = settingsRef.current;
@@ -771,11 +966,12 @@ export default function Home() {
 
   const pointer = (event: React.PointerEvent<HTMLCanvasElement>, phase: 'down' | 'move' | 'up') => {
     event.preventDefault();
-    if (settingsOpen || !runningRef.current) return;
+    if (settingsOpen || !runningRef.current || pausedRef.current) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left, y = event.clientY - rect.top;
     const gesture = gestureRef.current, active = settingsRef.current, aim = aimRef.current, now = performance.now();
-    const baseX = rect.width / 2 + (aim.x / (WORLD_W / 2)) * (rect.width * 0.495), baseY = rect.height * 0.972;
+    const projectedBase = projectLane(aim.x, WORLD_H - 18, rect.width, rect.height);
+    const baseX = projectedBase.x, baseY = projectedBase.y;
     const handleX = baseX + Math.sin(aim.angle) * 68, handleY = baseY - Math.cos(aim.angle) * 68;
     if (phase === 'down') {
       let mode: GestureMode = 'direct';
@@ -789,7 +985,7 @@ export default function Home() {
       }
       Object.assign(gesture, { active: true, mode, pointerId: event.pointerId, originX: x, originY: y,
         lastX: x, lastY: y, positionLocked: false, samples: [{ y, t: now }] });
-      if (mode === 'position' || mode === 'direct') aim.x = worldXFromScreen(x, rect.width);
+      if (mode === 'position' || mode === 'direct') aim.x = screenToWorldX(x, WORLD_H - 18, rect.width, rect.height);
       if (mode === 'aim') { aim.locked = false; setAimLocked(false); }
       event.currentTarget.setPointerCapture(event.pointerId); predictionRef.current.lastCalc = 0; return;
     }
@@ -798,13 +994,18 @@ export default function Home() {
       gesture.lastX = x; gesture.lastY = y; gesture.samples.push({ y, t: now });
       gesture.samples = gesture.samples.filter((sample) => now - sample.t < 160);
       const upward = gesture.originY - y;
-      if (gesture.mode === 'position') aim.x = worldXFromScreen(x, rect.width);
+      if (gesture.mode === 'position') aim.x = screenToWorldX(x, WORLD_H - 18, rect.width, rect.height);
       else if (gesture.mode === 'aim') {
-        const updatedBaseX = rect.width / 2 + (aim.x / (WORLD_W / 2)) * (rect.width * 0.495);
+        const updatedBaseX = projectLane(aim.x, WORLD_H - 18, rect.width, rect.height).x;
         const max = active.maxAngle * Math.PI / 180;
         aim.angle = clamp(Math.atan2(x - updatedBaseX, Math.max(5, baseY - y)), -max, max);
       } else if (gesture.mode === 'direct') {
-        if (upward < 18 && !gesture.positionLocked) aim.x = worldXFromScreen(x, rect.width); else gesture.positionLocked = true;
+        aim.angle = 0;
+        if (!active.straightStabilizer) aim.x = screenToWorldX(x, WORLD_H - 18, rect.width, rect.height);
+        else if (!gesture.positionLocked) {
+          aim.x = screenToWorldX(x, WORLD_H - 18, rect.width, rect.height);
+          if (upward >= active.straightLockDistance) gesture.positionLocked = true;
+        }
         setPowerPreview(clamp(upward / active.throwThreshold, 0, 1));
       } else {
         const strength = powerFromGesture(gesture, y), low = Math.min(active.minPower, active.maxPower), high = Math.max(active.minPower, active.maxPower);
@@ -826,6 +1027,37 @@ export default function Home() {
     setAimLocked(aimRef.current.locked);
     predictionRef.current.lastCalc = 0;
   };
+  const openSettings = () => {
+    if (runningRef.current) {
+      pausedRef.current = true;
+      setPaused(true);
+    }
+    setSettingsOpen(true);
+  };
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    if (runningRef.current && !manualPauseRef.current) {
+      pausedRef.current = false;
+      setPaused(false);
+    }
+  };
+  const pauseGame = () => {
+    manualPauseRef.current = true;
+    pausedRef.current = true;
+    setPaused(true);
+    setSettingsOpen(false);
+    setPowerPreview(0);
+  };
+  const resumeGame = () => {
+    manualPauseRef.current = false;
+    pausedRef.current = false;
+    setPaused(false);
+    safeUntilRef.current = Math.max(safeUntilRef.current, performance.now() + 350);
+  };
+  const restartGame = () => {
+    setSettingsOpen(false);
+    reset(settingsRef.current);
+  };
   const patchSettings = (patch: Partial<Settings>) => {
     if (patch.dynamicDanger !== undefined) {
       dangerLineRef.current = patch.dynamicDanger ? DYNAMIC_DANGER_START : FIXED_DANGER;
@@ -835,9 +1067,12 @@ export default function Home() {
     setSettings((current) => ({ ...current, ...patch }));
   };
   const preset = (kind: 'stable' | 'balanced' | 'extreme') => {
-    if (kind === 'stable') patchSettings({ wallRest: 0.4, cupRest: 0.07, drag: 0.978, slope: 0.014, fixedSpeed: 7 });
-    else if (kind === 'balanced') patchSettings({ wallRest: 0.72, cupRest: 0.12, drag: 0.984, slope: 0.011, fixedSpeed: 7.7 });
-    else patchSettings({ wallRest: 0.96, cupRest: 0.3, drag: 0.993, slope: 0.006, fixedSpeed: 9.4, minPower: 6.8, maxPower: 14.5 });
+    if (kind === 'stable') patchSettings({ wallRest: 0.72, cupRest: 0.1, drag: 0.982, slope: 0.012,
+      fixedSpeed: 8, minPower: 7, maxPower: 14, sleepSpeed: 0.1, sleepDelayMs: 320 });
+    else if (kind === 'balanced') patchSettings({ wallRest: 0.9, cupRest: 0.18, drag: 0.989, slope: 0.009,
+      fixedSpeed: 9, minPower: 9, maxPower: 20, sleepSpeed: 0.08, sleepDelayMs: 420 });
+    else patchSettings({ wallRest: 0.98, cupRest: 0.3, drag: 0.994, slope: 0.006,
+      fixedSpeed: 10.5, minPower: 10, maxPower: 24, sleepSpeed: 0.045, sleepDelayMs: 650 });
   };
 
   return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲">
@@ -846,7 +1081,7 @@ export default function Home() {
       <div className="orders hud-tile"><small>訂單</small><b>{orders}</b><em>累積 {lifetimeOrders}</em></div>
       <div className="queue hud-tile"><CupPreview label="下一杯" level={queue[0]} theme={settings.theme}/><i>›</i><CupPreview label="再下一杯" level={queue[1]} theme={settings.theme}/></div>
       <div className="shots hud-tile"><small>已投</small><b>{shots}</b></div>
-      <button className="settings-button" onClick={() => setSettingsOpen(true)} aria-label="開啟設定">⚙</button>
+      <button className="settings-button" onClick={openSettings} aria-label="開啟設定">⚙</button>
     </header>
     <div className="playfield">
       <canvas ref={canvasRef} onPointerDown={(e) => pointer(e, 'down')} onPointerMove={(e) => pointer(e, 'move')} onPointerUp={(e) => pointer(e, 'up')} onPointerCancel={(e) => pointer(e, 'up')} aria-label="定位、瞄準並投擲杯子"/>
@@ -857,6 +1092,7 @@ export default function Home() {
       </div>
       {settings.angle && <button className={`aim-state ${aimLocked ? 'locked' : ''}`} onClick={toggleAimLock}>{aimLocked ? '角度已鎖定・點此解鎖' : '拖曳杯子或瞄準線・點此鎖定'}</button>}
       {powerPreview > 0 && <div className="power-meter"><i style={{ height: `${Math.max(8, powerPreview * 100)}%` }}/><span>{settings.power ? '力度' : '有效'}</span></div>}
+      {paused && !settingsOpen && !gameOver && <div className="pause-panel"><small>遊戲已暫停</small><h2>杯子與危險線已凍結</h2><div><button onClick={resumeGame}>繼續遊戲</button><button className="secondary" onClick={openSettings}>開啟設定</button></div></div>}
       {gameOver && <div className="game-over"><small>杯子越過危險線</small><h2>{score.toLocaleString()}</h2><p>本局訂單 {orders}・復活 {revives} 次</p><div>
         {historyCount > 0 && <button className="undo-action" onClick={undo}>復原</button>}<button onClick={revive}>復活</button><button className="secondary" onClick={() => reset()}>重來</button>
       </div></div>}
@@ -865,7 +1101,7 @@ export default function Home() {
       {LEVELS.map((level, index) => <div className={`mini-level ${index <= unlocked ? '' : 'future'}`} key={level.name} title={level.name}><CupIcon level={index} theme={settings.theme}/>{index < 6 && <i>›</i>}</div>)}
       <div className="blast-mark" title="最高級爆炸">💥</div>
     </section>
-    {settingsOpen && <SettingsSheet settings={settings} close={() => setSettingsOpen(false)} patch={patchSettings} preset={preset}/>}
+    {settingsOpen && <SettingsSheet settings={settings} close={closeSettings} patch={patchSettings} preset={preset} pause={pauseGame} restart={restartGame}/>}
   </section></main>;
 }
 
@@ -892,7 +1128,8 @@ function ThemeButton({ value, current, title, patch }: { value: Theme; current: 
   return <button className={current === value ? 'active' : ''} onClick={() => patch({ theme: value })}><CupIcon level={value.startsWith('premium') ? 6 : 2} theme={value}/><span>{title}</span></button>;
 }
 
-function SettingsSheet({ settings, close, patch, preset }: { settings: Settings; close: () => void; patch: (patch: Partial<Settings>) => void; preset: (kind: 'stable' | 'balanced' | 'extreme') => void }) {
+function SettingsSheet({ settings, close, patch, preset, pause, restart }: { settings: Settings; close: () => void; patch: (patch: Partial<Settings>) => void; preset: (kind: 'stable' | 'balanced' | 'extreme') => void; pause: () => void; restart: () => void }) {
+  const [confirmRestart, setConfirmRestart] = useState(false);
   return <div className="modal-backdrop" onPointerDown={(e) => { if (e.target === e.currentTarget) close(); }}><section className="settings-sheet" role="dialog" aria-modal="true" aria-label="遊戲設定">
     <header><div><small>遊戲設定</small><h2>玩法與外觀</h2></div><button onClick={close} aria-label="關閉設定">×</button></header>
     <div className="sheet-scroll">
@@ -903,19 +1140,22 @@ function SettingsSheet({ settings, close, patch, preset }: { settings: Settings;
       <div className="setting-group">
         <Toggle title="動態危險線" note="未融合會推進，融合與訂單會退回" value={settings.dynamicDanger} onChange={(v) => patch({ dynamicDanger: v })}/>
         <Toggle title="角度瞄準" note="杯子調位置、瞄準線調角度、二次滑動投擲" value={settings.angle} onChange={(v) => patch({ angle: v })}/>
+        <Toggle title="直線防手抖" note="直線模式達到距離後，隱形固定起點與方向" value={settings.straightStabilizer} onChange={(v) => patch({ straightStabilizer: v })}/>
+        {settings.straightStabilizer && <Slider title="防手抖觸發距離" value={settings.straightLockDistance}
+          min={0} max={40} step={1} unit="px" onChange={(v) => patch({ straightLockDistance: v })}/>}
         <Toggle title="力度控制" note="距離 70%＋平均速度 30%" value={settings.power} onChange={(v) => patch({ power: v })}/>
         <Toggle title="顯示杯子等級" note="在杯身顯示 1～7" value={settings.levels} onChange={(v) => patch({ levels: v })}/>
         <Toggle title="顯示反彈路徑" note="使用斜坡物理預測軌跡" value={settings.bounces} onChange={(v) => patch({ bounces: v })}/>
         <Toggle title="音效" note="融合、爆炸與投擲音效" value={settings.sound} onChange={(v) => patch({ sound: v })}/>
         <Toggle title="震動" note="預設關閉，可隨時開啟" value={settings.vibration} onChange={(v) => patch({ vibration: v })}/>
         <Slider title="瞄準線長度" value={settings.aimLength} min={0} max={3000} step={100} onChange={(v) => patch({ aimLength: v })}/>
-        <Slider title="最小力度" value={settings.minPower} min={4.5} max={12} step={0.1} onChange={(v) => patch({ minPower: Math.min(v, settings.maxPower - 0.1) })}/>
-        <Slider title="最大力度" value={settings.maxPower} min={6} max={15} step={0.1} onChange={(v) => patch({ maxPower: Math.max(v, settings.minPower + 0.1) })}/>
+        <Slider title="最小力度" value={settings.minPower} min={4.5} max={20} step={0.1} onChange={(v) => patch({ minPower: Math.min(v, settings.maxPower - 0.1) })}/>
+        <Slider title="最大力度" value={settings.maxPower} min={6} max={25} step={0.1} onChange={(v) => patch({ maxPower: Math.max(v, settings.minPower + 0.1) })}/>
         <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(v) => patch({ throwThreshold: v })}/>
       </div>
-      <details className="developer"><summary>開發者專區 <span>調整遊戲手感</span></summary><div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>平衡玩法</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復新版預設</button></div>
-        <Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(v) => patch({ maxAngle: v })}/><Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={12} step={0.1} onChange={(v) => patch({ fixedSpeed: v })}/><Slider title="左右牆反彈" value={settings.wallRest} min={0.1} max={0.98} step={0.01} onChange={(v) => patch({ wallRest: v })}/><Slider title="前方牆反彈" value={settings.frontRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ frontRest: v })}/><Slider title="杯子互撞反彈" value={settings.cupRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ cupRest: v })}/><Slider title="速度衰減" value={settings.drag} min={0.96} max={0.995} step={0.001} onChange={(v) => patch({ drag: v })}/><Slider title="斜坡重力" value={settings.slope} min={0} max={0.03} step={0.001} onChange={(v) => patch({ slope: v })}/><Slider title="杯子尺寸" value={settings.size} min={0.8} max={1.25} step={0.01} onChange={(v) => patch({ size: v })}/><Slider title="結束等待" value={settings.gameOverMs} min={300} max={2500} step={100} unit="ms" onChange={(v) => patch({ gameOverMs: v })}/><Slider title="爆炸範圍" value={settings.blastRadius} min={80} max={210} step={5} onChange={(v) => patch({ blastRadius: v })}/><Slider title="爆炸推力" value={settings.blastForce} min={1} max={8} step={0.2} onChange={(v) => patch({ blastForce: v })}/>
+      <details className="developer"><summary>開發者專區 <span>調整遊戲手感</span></summary><div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復新版預設</button></div>
+        <Toggle title="顯示碰撞邊界" note="顯示杯子橢圓、左右護欄與終點牆" value={settings.debugHitboxes} onChange={(v) => patch({ debugHitboxes: v })}/><Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(v) => patch({ maxAngle: v })}/><Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(v) => patch({ fixedSpeed: v })}/><Slider title="左右牆反彈" value={settings.wallRest} min={0.1} max={0.98} step={0.01} onChange={(v) => patch({ wallRest: v })}/><Slider title="前方牆反彈" value={settings.frontRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ frontRest: v })}/><Slider title="杯子互撞反彈" value={settings.cupRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ cupRest: v })}/><Slider title="速度衰減" value={settings.drag} min={0.96} max={0.995} step={0.001} onChange={(v) => patch({ drag: v })}/><Slider title="斜坡重力" value={settings.slope} min={0} max={0.03} step={0.001} onChange={(v) => patch({ slope: v })}/><Slider title="休眠速度" value={settings.sleepSpeed} min={0.02} max={0.2} step={0.005} onChange={(v) => patch({ sleepSpeed: v })}/><Slider title="休眠等待" value={settings.sleepDelayMs} min={100} max={1200} step={20} unit="ms" onChange={(v) => patch({ sleepDelayMs: v })}/><Slider title="杯子尺寸（下一局）" value={settings.size} min={0.8} max={1.25} step={0.01} onChange={(v) => patch({ size: v })}/><Slider title="結束等待" value={settings.gameOverMs} min={300} max={2500} step={100} unit="ms" onChange={(v) => patch({ gameOverMs: v })}/><Slider title="爆炸範圍" value={settings.blastRadius} min={80} max={210} step={5} onChange={(v) => patch({ blastRadius: v })}/><Slider title="爆炸推力" value={settings.blastForce} min={1} max={8} step={0.2} onChange={(v) => patch({ blastForce: v })}/>
       </details>
-    </div><button className="done-button" onClick={close}>完成</button>
+    </div><div className="settings-actions"><button className="pause-action" onClick={pause}>暫停遊戲</button><button className={`restart-action ${confirmRestart ? 'confirm' : ''}`} onClick={() => { if (confirmRestart) restart(); else setConfirmRestart(true); }}>{confirmRestart ? '再次點擊確認重來' : '重新開始'}</button></div><button className="done-button" onClick={close}>完成並繼續</button>
   </section></div>;
 }
