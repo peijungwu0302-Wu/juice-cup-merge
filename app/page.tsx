@@ -2,183 +2,920 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const WORLD_W=340, WORLD_H=640;
-const LEVELS=[
-  {name:'檸檬露',color:'#f8d53c',dark:'#c28a12',emoji:'🍋'},
-  {name:'蜜柑汁',color:'#ff9d2f',dark:'#d95a10',emoji:'🍊'},
-  {name:'草莓乳',color:'#ff6986',dark:'#cf244a',emoji:'🍓'},
-  {name:'葡萄冰',color:'#9964df',dark:'#582397',emoji:'🍇'},
-  {name:'哈密瓜',color:'#62cf80',dark:'#21874d',emoji:'🌿'},
-  {name:'西瓜蘇打',color:'#fb5268',dark:'#bf1836',emoji:'🍉'},
-  {name:'彩虹果昔',color:'#55dbe0',dark:'#14889f',emoji:'🌈'},
+const WORLD_W = 340;
+const WORLD_H = 640;
+const FIXED_DANGER = WORLD_H - 72;
+const DYNAMIC_DANGER_START = WORLD_H - 140;
+// Dynamic mode may keep advancing until only the front pocket of the lane is safe.
+// Good merges buy room back, but a long run can no longer become effectively endless.
+const DYNAMIC_DANGER_MIN = WORLD_H - 580;
+const MERGE_SENSOR = 1.03;
+
+const LEVELS = [
+  { name: '檸檬露', color: '#f8d53c', dark: '#c28a12' },
+  { name: '蜜柑汁', color: '#ff9d2f', dark: '#d95a10' },
+  { name: '草莓乳', color: '#ff6986', dark: '#cf244a' },
+  { name: '葡萄冰', color: '#9964df', dark: '#582397' },
+  { name: '哈密瓜', color: '#62cf80', dark: '#21874d' },
+  { name: '西瓜蘇打', color: '#fb5268', dark: '#bf1836' },
+  { name: '彩虹果昔', color: '#55dbe0', dark: '#14889f' },
 ];
-const SIZE_CURVE=[1,1.11,1.18,1.32,1.49,1.69,1.92];
-type Theme='juice'|'sundae'|'wine';
-type Settings={angle:boolean;power:boolean;levels:boolean;theme:Theme;aimLength:number;bounces:boolean;sound:boolean;vibration:boolean;maxAngle:number;fixedSpeed:number;wallRest:number;frontRest:number;cupRest:number;drag:number;slope:number;size:number;throwThreshold:number;gameOverMs:number;blastRadius:number;blastForce:number};
-const DEFAULTS:Settings={angle:false,power:false,levels:false,theme:'juice',aimLength:1500,bounces:true,sound:false,vibration:false,maxAngle:85,fixedSpeed:7.4,wallRest:.72,frontRest:.06,cupRest:.11,drag:.982,slope:.012,size:1,throwThreshold:65,gameOverMs:1200,blastRadius:138,blastForce:4.2};
-type Cup={id:number;x:number;y:number;vx:number;vy:number;level:number;r:number;dangerMs:number;ageMs:number;safeExited:boolean};
-type Burst={x:number;y:number;life:number;color:string;maxR:number};
-type Aim={x:number;angle:number;locked:boolean};
-type Gesture={active:boolean;mode:'setup'|'throw'|'direct';pointerId:number;originX:number;originY:number;lastX:number;lastY:number;positionLocked:boolean;samples:Array<{y:number;t:number}>};
-type Pred={paths:Array<Array<{x:number;y:number}>>;lastCalc:number};
 
-const clamp=(n:number,a:number,b:number)=>Math.max(a,Math.min(b,n));
-const themeIcon=(t:Theme)=>t==='juice'?'🥤':t==='sundae'?'🍨':'🍷';
+const SIZE_CURVE = [1, 1.1, 1.16, 1.31, 1.48, 1.68, 1.92];
 
-export default function Home(){
-  const canvasRef=useRef<HTMLCanvasElement>(null),cupsRef=useRef<Cup[]>([]),burstsRef=useRef<Burst[]>([]),idRef=useRef(1);
-  const settingsRef=useRef<Settings>(DEFAULTS),runningRef=useRef(true),safeUntilRef=useRef(0),lastShotRef=useRef(0),revivesRef=useRef(0);
-  const aimRef=useRef<Aim>({x:0,angle:0,locked:false}),gestureRef=useRef<Gesture>({active:false,mode:'direct',pointerId:0,originX:0,originY:0,lastX:0,lastY:0,positionLocked:false,samples:[]});
-  const sizeRef=useRef({w:390,h:700,dpr:1}),queueRef=useRef<number[]>([0,0]),bagRef=useRef<number[]>([]),lastPowerRef=useRef(9),predictionRef=useRef<Pred>({paths:[],lastCalc:0});
-  const [settings,setSettings]=useState<Settings>(DEFAULTS),[settingsOpen,setSettingsOpen]=useState(false),[gameOver,setGameOver]=useState(false),[aimLocked,setAimLocked]=useState(false);
-  const [score,setScore]=useState(0),[best,setBest]=useState(0),[bestClean,setBestClean]=useState(0),[shots,setShots]=useState(0),[revives,setRevives]=useState(0);
-  const [orders,setOrders]=useState(0),[lifetimeOrders,setLifetimeOrders]=useState(0),[queue,setQueue]=useState<number[]>([0,0]),[unlocked,setUnlocked]=useState(0),[powerPreview,setPowerPreview]=useState(0);
+type Theme =
+  | 'premiumJuice'
+  | 'simpleJuice'
+  | 'premiumSundae'
+  | 'simpleSundae'
+  | 'premiumWine'
+  | 'simpleWine';
 
-  useEffect(()=>{
-    const raw=localStorage.getItem('juice-v3-settings');if(raw){try{setSettings({...DEFAULTS,...JSON.parse(raw)})}catch{}}
-    setBest(Number(localStorage.getItem('juice-best')||0));setBestClean(Number(localStorage.getItem('juice-best-clean')||0));setLifetimeOrders(Number(localStorage.getItem('juice-orders')||0));
-  },[]);
-  useEffect(()=>{settingsRef.current=settings;localStorage.setItem('juice-v3-settings',JSON.stringify(settings));predictionRef.current.lastCalc=0},[settings]);
+const PREMIUM_ASSETS: Partial<Record<Theme, string>> = {
+  premiumJuice: '/assets/cups-juice-premium-v1.png',
+  premiumSundae: '/assets/cups-sundae-premium-v1.png',
+  premiumWine: '/assets/cups-wine-premium-v1.png',
+};
 
-  const drawBag=useCallback(()=>{
-    if(!bagRef.current.length){const a=[0,0,0,0,0,0,1,1];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}bagRef.current=a}
-    return bagRef.current.shift()??0;
-  },[]);
-  const resetAim=()=>{aimRef.current={x:0,angle:0,locked:false};setAimLocked(false);predictionRef.current.lastCalc=0};
-  const reset=useCallback(()=>{
-    cupsRef.current=[];burstsRef.current=[];runningRef.current=true;safeUntilRef.current=0;revivesRef.current=0;bagRef.current=[];resetAim();
-    const q=[drawBag(),drawBag()];queueRef.current=q;setQueue(q);setScore(0);setShots(0);setRevives(0);setOrders(0);setUnlocked(0);setGameOver(false);setPowerPreview(0);
-  },[drawBag]);
-  useEffect(()=>reset(),[reset]);
+type Bounds = [number, number, number, number];
+const SPRITE_BOUNDS: Partial<Record<Theme, Bounds[]>> = {
+  premiumJuice: [
+    [47, 193, 310, 658], [0, 120, 311, 660], [0, 104, 310, 656],
+    [0, 55, 310, 684], [0, 23, 290, 670], [9, 30, 273, 666], [3, 67, 296, 657],
+  ],
+  premiumSundae: [
+    [23, 21, 304, 705], [1, 19, 304, 673], [15, 45, 288, 675],
+    [15, 213, 300, 675], [5, 15, 274, 675], [1, 23, 269, 701], [17, 23, 292, 693],
+  ],
+  premiumWine: [
+    [15, 23, 293, 740], [0, 33, 292, 740], [0, 43, 293, 740],
+    [0, 47, 292, 738], [0, 53, 293, 739], [0, 33, 292, 740], [0, 10, 283, 744],
+  ],
+};
 
-  const award=useCallback((points:number)=>{
-    setScore(old=>{const n=old+points;setBest(b=>{const v=Math.max(b,n);localStorage.setItem('juice-best',String(v));return v});if(revivesRef.current===0)setBestClean(b=>{const v=Math.max(b,n);localStorage.setItem('juice-best-clean',String(v));return v});return n});
-  },[]);
-  const signal=(strong=false)=>{const s=settingsRef.current;if(s.vibration&&navigator.vibrate)navigator.vibrate(strong?[28,25,45]:18);if(s.sound){try{const AC=window.AudioContext||(window as typeof window&{webkitAudioContext:typeof AudioContext}).webkitAudioContext,ac=new AC(),o=ac.createOscillator(),g=ac.createGain();o.connect(g);g.connect(ac.destination);o.frequency.value=strong?210:480;g.gain.setValueAtTime(.05,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+.18);o.start();o.stop(ac.currentTime+.18)}catch{}}};
-  const radiusFor=(level:number)=>19*SIZE_CURVE[level]*settingsRef.current.size;
+type Settings = {
+  angle: boolean;
+  power: boolean;
+  levels: boolean;
+  dynamicDanger: boolean;
+  theme: Theme;
+  aimLength: number;
+  bounces: boolean;
+  sound: boolean;
+  vibration: boolean;
+  maxAngle: number;
+  fixedSpeed: number;
+  minPower: number;
+  maxPower: number;
+  wallRest: number;
+  frontRest: number;
+  cupRest: number;
+  drag: number;
+  slope: number;
+  size: number;
+  throwThreshold: number;
+  gameOverMs: number;
+  blastRadius: number;
+  blastForce: number;
+};
 
-  const fire=useCallback((power:number)=>{
-    const now=performance.now();if(!runningRef.current||now-lastShotRef.current<50)return;lastShotRef.current=now;
-    const s=settingsRef.current,a=aimRef.current,level=queueRef.current[0],speed=s.power?power:s.fixedSpeed;
-    cupsRef.current.push({id:idRef.current++,x:a.x,y:WORLD_H-26,vx:Math.sin(a.angle)*speed,vy:-Math.cos(a.angle)*speed,level,r:radiusFor(level),dangerMs:0,ageMs:0,safeExited:false});
-    lastPowerRef.current=speed;setShots(v=>v+1);const q=[queueRef.current[1],drawBag()];queueRef.current=q;setQueue(q);resetAim();setPowerPreview(0);signal(false);
-  },[drawBag]);
+const DEFAULTS: Settings = {
+  angle: false,
+  power: false,
+  levels: false,
+  dynamicDanger: true,
+  theme: 'premiumJuice',
+  aimLength: 1700,
+  bounces: true,
+  sound: false,
+  vibration: false,
+  maxAngle: 85,
+  fixedSpeed: 8.5,
+  minPower: 6.5,
+  maxPower: 12.5,
+  wallRest: 0.84,
+  frontRest: 0.08,
+  cupRest: 0.2,
+  drag: 0.989,
+  slope: 0.009,
+  size: 1,
+  throwThreshold: 65,
+  gameOverMs: 1000,
+  blastRadius: 138,
+  blastForce: 4.2,
+};
 
-  const revive=()=>{
-    const sorted=[...cupsRef.current].sort((a,b)=>b.y-a.y),remove=new Set(sorted.slice(0,3).map(c=>c.id));cupsRef.current=cupsRef.current.filter(c=>!remove.has(c.id));
-    for(const c of cupsRef.current){c.y=Math.max(c.r+6,c.y-38);c.dangerMs=0;c.ageMs=1000;c.safeExited=true;c.vy-=.4}
-    revivesRef.current+=1;setRevives(revivesRef.current);safeUntilRef.current=performance.now()+3000;runningRef.current=true;setGameOver(false);resetAim();
-  };
+type Cup = {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  level: number;
+  r: number;
+  dangerMs: number;
+  ageMs: number;
+  safeExited: boolean;
+  mergeLockMs: number;
+};
 
-  useEffect(()=>{
-    const canvas=canvasRef.current,ctx=canvas?.getContext('2d');if(!canvas||!ctx)return;let raf=0,last=performance.now();
-    const resize=()=>{const b=canvas.getBoundingClientRect(),dpr=Math.min(2,devicePixelRatio||1);canvas.width=Math.round(b.width*dpr);canvas.height=Math.round(b.height*dpr);sizeRef.current={w:b.width,h:b.height,dpr}};
-    resize();const ro=new ResizeObserver(resize);ro.observe(canvas);
-    const geom=()=>{const {w,h}=sizeRef.current;return{cx:w/2,farY:42,nearY:h-8,farHalf:w*.275,nearHalf:w*.48}};
-    const project=(x:number,y:number)=>{const g=geom(),t=clamp(y/WORLD_H,0,1),half=g.farHalf+(g.nearHalf-g.farHalf)*t;return{x:g.cx+(x/(WORLD_W/2))*half,y:g.farY+(g.nearY-g.farY)*t,scale:.6+.4*t}};
+type Burst = { x: number; y: number; life: number; color: string; maxR: number };
+type Aim = { x: number; angle: number; locked: boolean };
+type GestureMode = 'position' | 'aim' | 'throw' | 'direct';
+type Gesture = {
+  active: boolean;
+  mode: GestureMode;
+  pointerId: number;
+  originX: number;
+  originY: number;
+  lastX: number;
+  lastY: number;
+  positionLocked: boolean;
+  samples: Array<{ y: number; t: number }>;
+};
+type Pred = { paths: Array<Array<{ x: number; y: number }>>; lastCalc: number };
+type GameSnapshot = {
+  cups: Cup[];
+  score: number;
+  shots: number;
+  orders: number;
+  queue: number[];
+  bag: number[];
+  unlocked: number;
+  dangerLine: number;
+  launchX: number;
+  revives: number;
+};
 
-    const simulate=(speed:number)=>{
-      const s=settingsRef.current,a=aimRef.current,pts:Array<{x:number;y:number}>=[],r=radiusFor(queueRef.current[0]);let x=a.x,y=WORLD_H-26,vx=Math.sin(a.angle)*speed,vy=-Math.cos(a.angle)*speed,travel=0,bounces=0;
-      for(let i=0;i<360&&pts.length<180&&travel<s.aimLength;i++){
-        const dt=.72;vy-=s.slope*dt;const f=Math.pow(s.drag,dt);vx*=f;vy*=f;const ox=x,oy=y;x+=vx*dt;y+=vy*dt;travel+=Math.hypot(x-ox,y-oy);
-        if(x-r<-WORLD_W/2){x=-WORLD_W/2+r;vx=Math.abs(vx)*s.wallRest;bounces++;if(!s.bounces)break}else if(x+r>WORLD_W/2){x=WORLD_W/2-r;vx=-Math.abs(vx)*s.wallRest;bounces++;if(!s.bounces)break}
-        if(y-r<0){y=r;vy=Math.abs(vy)*s.frontRest;bounces++;if(!s.bounces)break}
-        if(i%2===0)pts.push({x,y});
-        if(cupsRef.current.some(c=>Math.hypot(c.x-x,c.y-y)<c.r+r))break;
-        if(bounces>8)break;
-      }return pts;
+const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
+const isPremium = (theme: Theme) => theme.startsWith('premium');
+const simpleKind = (theme: Theme) =>
+  theme.includes('Sundae') ? 'sundae' : theme.includes('Wine') ? 'wine' : 'juice';
+const themeEmoji = (theme: Theme) =>
+  theme.includes('Sundae') ? '🍨' : theme.includes('Wine') ? '🍷' : '🥤';
+
+export default function Home() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cupsRef = useRef<Cup[]>([]);
+  const burstsRef = useRef<Burst[]>([]);
+  const idRef = useRef(1);
+  const settingsRef = useRef<Settings>(DEFAULTS);
+  const runningRef = useRef(true);
+  const safeUntilRef = useRef(0);
+  const lastShotRef = useRef(0);
+  const dangerLineRef = useRef(DYNAMIC_DANGER_START);
+  const lastLaunchXRef = useRef(0);
+  const revivesRef = useRef(0);
+  const aimRef = useRef<Aim>({ x: 0, angle: 0, locked: false });
+  const gestureRef = useRef<Gesture>({
+    active: false, mode: 'direct', pointerId: 0, originX: 0, originY: 0,
+    lastX: 0, lastY: 0, positionLocked: false, samples: [],
+  });
+  const sizeRef = useRef({ w: 390, h: 700, dpr: 1 });
+  const queueRef = useRef<number[]>([0, 0]);
+  const bagRef = useRef<number[]>([]);
+  const historyRef = useRef<GameSnapshot[]>([]);
+  const predictionRef = useRef<Pred>({ paths: [], lastCalc: 0 });
+  const scoreRef = useRef(0);
+  const shotsRef = useRef(0);
+  const ordersRef = useRef(0);
+  const unlockedRef = useRef(0);
+  const lifetimeOrdersRef = useRef(0);
+  const maxOrdersThisRunRef = useRef(0);
+  const hydratedRef = useRef(false);
+
+  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gameOver, setGameOver] = useState(false);
+  const [aimLocked, setAimLocked] = useState(false);
+  const [score, setScore] = useState(0);
+  const [best, setBest] = useState(0);
+  const [bestClean, setBestClean] = useState(0);
+  const [shots, setShots] = useState(0);
+  const [revives, setRevives] = useState(0);
+  const [orders, setOrders] = useState(0);
+  const [lifetimeOrders, setLifetimeOrders] = useState(0);
+  const [queue, setQueue] = useState<number[]>([0, 0]);
+  const [unlocked, setUnlocked] = useState(0);
+  const [powerPreview, setPowerPreview] = useState(0);
+  const [historyCount, setHistoryCount] = useState(0);
+
+  const drawBag = useCallback(() => {
+    if (!bagRef.current.length) {
+      const bag = [0, 0, 0, 0, 0, 0, 1, 1];
+      for (let i = bag.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [bag[i], bag[j]] = [bag[j], bag[i]];
+      }
+      bagRef.current = bag;
+    }
+    return bagRef.current.shift() ?? 0;
+  }, []);
+
+  const resetAim = useCallback((x = lastLaunchXRef.current) => {
+    aimRef.current = { x, angle: 0, locked: false };
+    setAimLocked(false);
+    predictionRef.current.lastCalc = 0;
+  }, []);
+
+  const reset = useCallback((withSettings?: Settings) => {
+    const active = withSettings ?? settingsRef.current;
+    cupsRef.current = [];
+    burstsRef.current = [];
+    historyRef.current = [];
+    runningRef.current = true;
+    safeUntilRef.current = 0;
+    revivesRef.current = 0;
+    bagRef.current = [];
+    lastLaunchXRef.current = 0;
+    maxOrdersThisRunRef.current = 0;
+    dangerLineRef.current = active.dynamicDanger ? DYNAMIC_DANGER_START : FIXED_DANGER;
+    resetAim(0);
+    const next = [drawBag(), drawBag()];
+    queueRef.current = next;
+    scoreRef.current = 0;
+    shotsRef.current = 0;
+    ordersRef.current = 0;
+    unlockedRef.current = 0;
+    setQueue(next);
+    setScore(0);
+    setShots(0);
+    setRevives(0);
+    setOrders(0);
+    setUnlocked(0);
+    setHistoryCount(0);
+    setGameOver(false);
+    setPowerPreview(0);
+  }, [drawBag, resetAim]);
+
+  useEffect(() => {
+    let loaded = DEFAULTS;
+    const raw = localStorage.getItem('juice-v4-settings');
+    if (raw) {
+      try { loaded = { ...DEFAULTS, ...JSON.parse(raw) }; } catch { /* ignore */ }
+    }
+    settingsRef.current = loaded;
+    setSettings(loaded);
+    setBest(Number(localStorage.getItem('juice-best') || 0));
+    setBestClean(Number(localStorage.getItem('juice-best-clean') || 0));
+    const storedOrders = Number(localStorage.getItem('juice-orders') || 0);
+    lifetimeOrdersRef.current = storedOrders;
+    setLifetimeOrders(storedOrders);
+    hydratedRef.current = true;
+    reset(loaded);
+  }, [reset]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+    predictionRef.current.lastCalc = 0;
+    if (hydratedRef.current) localStorage.setItem('juice-v4-settings', JSON.stringify(settings));
+  }, [settings]);
+
+  const signal = useCallback((strong = false) => {
+    const active = settingsRef.current;
+    if (active.vibration && navigator.vibrate) navigator.vibrate(strong ? [28, 25, 45] : 18);
+    if (!active.sound) return;
+    try {
+      const AudioCtor = window.AudioContext ||
+        (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const audio = new AudioCtor();
+      const oscillator = audio.createOscillator();
+      const gain = audio.createGain();
+      oscillator.connect(gain);
+      gain.connect(audio.destination);
+      oscillator.frequency.value = strong ? 210 : 480;
+      gain.gain.setValueAtTime(0.05, audio.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.18);
+      oscillator.start();
+      oscillator.stop(audio.currentTime + 0.18);
+    } catch { /* optional */ }
+  }, []);
+
+  const radiusFor = useCallback((level: number) =>
+    22.8 * SIZE_CURVE[level] * settingsRef.current.size, []);
+
+  const award = useCallback((points: number) => {
+    const next = scoreRef.current + points;
+    scoreRef.current = next;
+    setScore(next);
+    setBest((old) => {
+      const value = Math.max(old, next);
+      localStorage.setItem('juice-best', String(value));
+      return value;
+    });
+    if (revivesRef.current === 0) {
+      setBestClean((old) => {
+        const value = Math.max(old, next);
+        localStorage.setItem('juice-best-clean', String(value));
+        return value;
+      });
+    }
+  }, []);
+
+  const registerOrder = useCallback(() => {
+    const next = ordersRef.current + 1;
+    ordersRef.current = next;
+    setOrders(next);
+    if (next > maxOrdersThisRunRef.current) {
+      maxOrdersThisRunRef.current = next;
+      const lifetime = lifetimeOrdersRef.current + 1;
+      lifetimeOrdersRef.current = lifetime;
+      setLifetimeOrders(lifetime);
+      localStorage.setItem('juice-orders', String(lifetime));
+    }
+  }, []);
+
+  const pushHistory = useCallback(() => {
+    const snapshot: GameSnapshot = {
+      cups: cupsRef.current.map((cup) => ({ ...cup })),
+      score: scoreRef.current,
+      shots: shotsRef.current,
+      orders: ordersRef.current,
+      queue: [...queueRef.current],
+      bag: [...bagRef.current],
+      unlocked: unlockedRef.current,
+      dangerLine: dangerLineRef.current,
+      launchX: aimRef.current.x,
+      revives: revivesRef.current,
     };
-    const recalcPred=(now:number)=>{const s=settingsRef.current;if(s.aimLength<=0){predictionRef.current.paths=[];return}if(now-predictionRef.current.lastCalc<100)return;predictionRef.current.lastCalc=now;predictionRef.current.paths=s.power?[simulate(6.5),simulate(lastPowerRef.current||9),simulate(12.2)]:[simulate(s.fixedSpeed)]};
+    historyRef.current = [...historyRef.current, snapshot].slice(-2);
+    setHistoryCount(historyRef.current.length);
+  }, []);
 
-    const glassShadow=(x:number,y:number,w:number)=>{ctx.fillStyle='#3d291d2d';ctx.beginPath();ctx.ellipse(x+w*.08,y+2,w*.53,w*.16,-.08,0,Math.PI*2);ctx.fill()};
-    const glassOutline=(path:Path2D)=>{ctx.fillStyle='#eefcfa30';ctx.fill(path);ctx.strokeStyle='#ffffffdf';ctx.lineWidth=2.2;ctx.stroke(path);ctx.strokeStyle='#56757970';ctx.lineWidth=.8;ctx.stroke(path)};
-    const garnish=(level:number,x:number,y:number,w:number)=>{
-      ctx.save();if(level===0){ctx.fillStyle='#ffe344';ctx.strokeStyle='#d1a20c';ctx.lineWidth=1;ctx.beginPath();ctx.arc(x+w*.33,y,w*.16,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(x+w*.33,y);ctx.lineTo(x+w*.46,y);ctx.stroke()}
-      if(level===1){ctx.strokeStyle='#f7f0df';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(x+w*.24,y+w*.05);ctx.lineTo(x+w*.38,y-w*.62);ctx.stroke();ctx.strokeStyle='#ef5e35';ctx.lineWidth=1.5;ctx.setLineDash([5,5]);ctx.stroke();ctx.setLineDash([])}
-      if(level===2){ctx.fillStyle='#ff4866';for(const dx of[-.2,.12]){ctx.beginPath();ctx.arc(x+w*dx,y-w*.04,w*.1,0,Math.PI*2);ctx.fill()}}
-      if(level===3){ctx.fillStyle='#d9bbff';for(const p of[[-.18,-.05],[.18,.06],[0,.15]]){ctx.beginPath();ctx.arc(x+w*p[0],y+w*p[1],w*.045,0,Math.PI*2);ctx.fill()}}
-      if(level===4){ctx.fillStyle='#39a953';ctx.beginPath();ctx.ellipse(x-w*.1,y-w*.13,w*.15,w*.07,-.5,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.ellipse(x+w*.09,y-w*.16,w*.15,w*.07,.45,0,Math.PI*2);ctx.fill()}
-      if(level===5){ctx.fillStyle='#fa4057';ctx.strokeStyle='#247744';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+w*.13,y-w*.18);ctx.lineTo(x+w*.48,y+w*.02);ctx.lineTo(x+w*.34,y-w*.34);ctx.closePath();ctx.fill();ctx.stroke()}
-      if(level===6){ctx.fillStyle='#d52b3f';ctx.beginPath();ctx.arc(x,y-w*.22,w*.105,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#3d8d4f';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,y-w*.31);ctx.quadraticCurveTo(x+w*.08,y-w*.48,x+w*.18,y-w*.43);ctx.stroke()}
+  const undo = useCallback(() => {
+    const snapshot = historyRef.current.pop();
+    if (!snapshot) return;
+    cupsRef.current = snapshot.cups.map((cup) => ({ ...cup }));
+    scoreRef.current = snapshot.score;
+    shotsRef.current = snapshot.shots;
+    ordersRef.current = snapshot.orders;
+    queueRef.current = [...snapshot.queue];
+    bagRef.current = [...snapshot.bag];
+    unlockedRef.current = snapshot.unlocked;
+    dangerLineRef.current = snapshot.dangerLine;
+    lastLaunchXRef.current = snapshot.launchX;
+    revivesRef.current = snapshot.revives;
+    setScore(snapshot.score);
+    setShots(snapshot.shots);
+    setOrders(snapshot.orders);
+    setQueue([...snapshot.queue]);
+    setUnlocked(snapshot.unlocked);
+    setRevives(snapshot.revives);
+    setHistoryCount(historyRef.current.length);
+    runningRef.current = true;
+    setGameOver(false);
+    safeUntilRef.current = performance.now() + 1000;
+    lastShotRef.current = 0;
+    resetAim(snapshot.launchX);
+  }, [resetAim]);
+
+  const fire = useCallback((requestedPower: number) => {
+    const now = performance.now();
+    if (!runningRef.current || now - lastShotRef.current < 50) return;
+    lastShotRef.current = now;
+    pushHistory();
+    const active = settingsRef.current;
+    const aim = aimRef.current;
+    const level = queueRef.current[0];
+    const low = Math.min(active.minPower, active.maxPower);
+    const high = Math.max(active.minPower, active.maxPower);
+    const speed = active.power ? clamp(requestedPower, low, high) : active.fixedSpeed;
+    cupsRef.current.push({
+      id: idRef.current++, x: aim.x, y: WORLD_H - 26,
+      vx: Math.sin(aim.angle) * speed, vy: -Math.cos(aim.angle) * speed,
+      level, r: radiusFor(level), dangerMs: 0, ageMs: 0,
+      safeExited: false, mergeLockMs: 0,
+    });
+    if (active.dynamicDanger) {
+      dangerLineRef.current = clamp(dangerLineRef.current - 9, DYNAMIC_DANGER_MIN, FIXED_DANGER);
+    }
+    shotsRef.current += 1;
+    setShots(shotsRef.current);
+    const next = [queueRef.current[1], drawBag()];
+    queueRef.current = next;
+    setQueue(next);
+    lastLaunchXRef.current = aim.x;
+    resetAim(aim.x);
+    setPowerPreview(0);
+    signal(false);
+  }, [drawBag, pushHistory, radiusFor, resetAim, signal]);
+
+  const revive = useCallback(() => {
+    const sorted = [...cupsRef.current].sort((a, b) => b.y - a.y);
+    const remove = new Set(sorted.slice(0, 3).map((cup) => cup.id));
+    cupsRef.current = cupsRef.current.filter((cup) => !remove.has(cup.id));
+    for (const cup of cupsRef.current) {
+      cup.y = Math.max(cup.r + 6, cup.y - 45);
+      cup.dangerMs = 0;
+      cup.ageMs = 1000;
+      cup.safeExited = true;
+      cup.vy -= 0.4;
+    }
+    revivesRef.current += 1;
+    setRevives(revivesRef.current);
+    if (settingsRef.current.dynamicDanger) {
+      dangerLineRef.current = clamp(dangerLineRef.current + 40, DYNAMIC_DANGER_MIN, FIXED_DANGER);
+    }
+    safeUntilRef.current = performance.now() + 3000;
+    runningRef.current = true;
+    setGameOver(false);
+    resetAim(lastLaunchXRef.current);
+  }, [resetAim]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext('2d');
+    if (!canvas || !context) return;
+    const ctx = context;
+    let raf = 0;
+    let last = performance.now();
+    const art: Partial<Record<Theme | 'lane', HTMLImageElement>> = {};
+    const lane = new Image();
+    lane.src = '/assets/lane-premium-v1.png';
+    art.lane = lane;
+    (Object.entries(PREMIUM_ASSETS) as Array<[Theme, string]>).forEach(([theme, src]) => {
+      const image = new Image();
+      image.src = src;
+      art[theme] = image;
+    });
+
+    const resize = () => {
+      const bounds = canvas.getBoundingClientRect();
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      canvas.width = Math.round(bounds.width * dpr);
+      canvas.height = Math.round(bounds.height * dpr);
+      sizeRef.current = { w: bounds.width, h: bounds.height, dpr };
+    };
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+
+    const geometry = () => {
+      const { w, h } = sizeRef.current;
+      return { cx: w / 2, farY: h * 0.195, nearY: h * 0.992, farHalf: w * 0.19, nearHalf: w * 0.495 };
+    };
+    const project = (x: number, y: number) => {
+      const g = geometry();
+      const t = clamp(y / WORLD_H, 0, 1);
+      const half = g.farHalf + (g.nearHalf - g.farHalf) * t;
+      return { x: g.cx + (x / (WORLD_W / 2)) * half, y: g.farY + (g.nearY - g.farY) * t, scale: 0.58 + 0.42 * t };
+    };
+    const drawCover = (image: HTMLImageElement, w: number, h: number) => {
+      if (!image.complete || !image.naturalWidth) return false;
+      const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
+      const sw = w / scale;
+      const sh = h / scale;
+      ctx.drawImage(image, (image.naturalWidth - sw) / 2, (image.naturalHeight - sh) / 2, sw, sh, 0, 0, w, h);
+      return true;
+    };
+
+    const simulate = (speed: number) => {
+      const active = settingsRef.current;
+      const aim = aimRef.current;
+      const points: Array<{ x: number; y: number }> = [];
+      const r = radiusFor(queueRef.current[0]);
+      let x = aim.x;
+      let y = WORLD_H - 26;
+      let vx = Math.sin(aim.angle) * speed;
+      let vy = -Math.cos(aim.angle) * speed;
+      let travel = 0;
+      let bounces = 0;
+      for (let i = 0; i < 420 && points.length < 210 && travel < active.aimLength; i += 1) {
+        const dt = 0.65;
+        vy -= active.slope * dt;
+        const friction = Math.pow(active.drag, dt);
+        vx *= friction;
+        vy *= friction;
+        const oldX = x;
+        const oldY = y;
+        x += vx * dt;
+        y += vy * dt;
+        travel += Math.hypot(x - oldX, y - oldY);
+        if (x - r < -WORLD_W / 2) {
+          x = -WORLD_W / 2 + r;
+          vx = Math.abs(vx) * active.wallRest;
+          bounces += 1;
+          if (!active.bounces) break;
+        } else if (x + r > WORLD_W / 2) {
+          x = WORLD_W / 2 - r;
+          vx = -Math.abs(vx) * active.wallRest;
+          bounces += 1;
+          if (!active.bounces) break;
+        }
+        if (y - r < 0) {
+          y = r;
+          vy = Math.abs(vy) * active.frontRest;
+          bounces += 1;
+          if (!active.bounces) break;
+        }
+        if (i % 2 === 0) points.push({ x, y });
+        if (cupsRef.current.some((cup) => Math.hypot(cup.x - x, cup.y - y) < cup.r + r)) break;
+        if (bounces > 10) break;
+      }
+      return points;
+    };
+    const recalcPrediction = (now: number) => {
+      const active = settingsRef.current;
+      if (active.aimLength <= 0) { predictionRef.current.paths = []; return; }
+      if (now - predictionRef.current.lastCalc < 100) return;
+      predictionRef.current.lastCalc = now;
+      const low = Math.min(active.minPower, active.maxPower);
+      const high = Math.max(active.minPower, active.maxPower);
+      predictionRef.current.paths = active.power
+        ? [simulate(low), simulate((low + high) / 2), simulate(high)]
+        : [simulate(active.fixedSpeed)];
+    };
+
+    const drawPremiumCup = (cup: Cup, theme: Theme) => {
+      const image = art[theme];
+      const bounds = SPRITE_BOUNDS[theme]?.[cup.level];
+      if (!image || !image.complete || !image.naturalWidth || !bounds) return false;
+      const p = project(cup.x, cup.y);
+      const cellWidth = image.naturalWidth / 7;
+      const [bx0, by0, bx1, by1] = bounds;
+      const sourceW = bx1 - bx0;
+      const sourceH = by1 - by0;
+      const visualWidth = cup.r * 2 * p.scale;
+      const visualHeight = visualWidth * (sourceH / sourceW);
+      ctx.drawImage(image, cup.level * cellWidth + bx0, by0, sourceW, sourceH,
+        p.x - visualWidth / 2, p.y - visualHeight, visualWidth, visualHeight);
+      if (settingsRef.current.levels) {
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#5d2d1ccc';
+        ctx.lineWidth = 3;
+        ctx.font = `900 ${Math.max(11, visualWidth * 0.3)}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeText(String(cup.level + 1), p.x, p.y - visualHeight * 0.45);
+        ctx.fillText(String(cup.level + 1), p.x, p.y - visualHeight * 0.45);
+        ctx.restore();
+      }
+      return true;
+    };
+
+    const garnish = (level: number, x: number, y: number, w: number) => {
+      ctx.save();
+      if (level === 0) {
+        ctx.fillStyle = '#ffe344'; ctx.strokeStyle = '#d1a20c';
+        ctx.beginPath(); ctx.arc(x + w * 0.32, y, w * 0.15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      } else if (level === 1) {
+        ctx.strokeStyle = '#fff6df'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(x + w * 0.18, y); ctx.lineTo(x + w * 0.36, y - w * 0.55); ctx.stroke();
+      } else if (level === 2) {
+        ctx.fillStyle = '#ff4866'; ctx.beginPath(); ctx.arc(x + w * 0.18, y, w * 0.1, 0, Math.PI * 2); ctx.fill();
+      } else if (level === 4) {
+        ctx.fillStyle = '#37a950'; ctx.beginPath(); ctx.ellipse(x, y - w * 0.08, w * 0.18, w * 0.07, -0.4, 0, Math.PI * 2); ctx.fill();
+      } else if (level === 5) {
+        ctx.fillStyle = '#f94b61'; ctx.strokeStyle = '#247744';
+        ctx.beginPath(); ctx.moveTo(x + w * 0.05, y - w * 0.2); ctx.lineTo(x + w * 0.42, y); ctx.lineTo(x + w * 0.32, y - w * 0.35); ctx.closePath(); ctx.fill(); ctx.stroke();
+      } else if (level === 6) {
+        ctx.fillStyle = '#d52b3f'; ctx.beginPath(); ctx.arc(x, y - w * 0.18, w * 0.1, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.restore();
     };
-    const levelNumber=(level:number,x:number,y:number,w:number)=>{if(!settingsRef.current.levels)return;ctx.save();ctx.fillStyle='#fff';ctx.shadowColor='#32180b99';ctx.shadowBlur=4;ctx.font=`800 ${Math.max(11,w*.25)}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(level+1),x,y);ctx.restore()};
-    const drawJuice=(c:Cup)=>{const p=project(c.x,c.y),j=LEVELS[c.level],w=c.r*2.2*p.scale,h=w*1.43,top=p.y-h,bot=p.y,bh=w*.34,th=w*.51;glassShadow(p.x,p.y,w);
-      const body=new Path2D();body.moveTo(p.x-th,top);body.quadraticCurveTo(p.x-th*.92,top+h*.55,p.x-bh,bot);body.quadraticCurveTo(p.x,bot+w*.06,p.x+bh,bot);body.quadraticCurveTo(p.x+th*.92,top+h*.55,p.x+th,top);body.closePath();
-      ctx.save();ctx.clip(body);if(c.level===6){const cols=['#ef495d','#ff9d28','#ffe047','#59c777','#4aaee8','#8d58d2'];cols.forEach((col,i)=>{ctx.fillStyle=col;ctx.fillRect(p.x-th,top+h*.2+i*h*.12,w,h*.13)})}else{const gr=ctx.createLinearGradient(0,top,0,bot);gr.addColorStop(0,j.color+'dd');gr.addColorStop(1,j.dark+'f2');ctx.fillStyle=gr;ctx.fillRect(p.x-th,top+h*.2,w,h*.78)}ctx.fillStyle='#ffffff30';ctx.fillRect(p.x-w*.29,top,w*.11,h);ctx.restore();glassOutline(body);
-      ctx.fillStyle=j.color;ctx.globalAlpha=.88;ctx.beginPath();ctx.ellipse(p.x,top+h*.2,th*.92,w*.13,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle='#ffffffeb';ctx.lineWidth=2.5;ctx.beginPath();ctx.ellipse(p.x,top,th,w*.16,0,0,Math.PI*2);ctx.stroke();ctx.strokeStyle='#6d929366';ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(p.x,top+h*.02,th*.9,w*.13,0,0,Math.PI*2);ctx.stroke();garnish(c.level,p.x,top,w);levelNumber(c.level,p.x,top+h*.62,w)};
-    const drawSundae=(c:Cup)=>{const p=project(c.x,c.y),j=LEVELS[c.level],w=c.r*2.35*p.scale,h=w*1.55,top=p.y-h,bowlY=top+h*.42;glassShadow(p.x,p.y,w);
-      ctx.strokeStyle='#eaffffdd';ctx.lineWidth=Math.max(2,w*.045);ctx.beginPath();ctx.moveTo(p.x,top+h*.36);ctx.quadraticCurveTo(p.x-w*.36,bowlY,p.x-w*.18,top+h*.75);ctx.quadraticCurveTo(p.x,top+h*.88,p.x+w*.18,top+h*.75);ctx.quadraticCurveTo(p.x+w*.36,bowlY,p.x,top+h*.36);ctx.stroke();ctx.beginPath();ctx.moveTo(p.x,top+h*.78);ctx.lineTo(p.x,p.y-w*.08);ctx.ellipse(p.x,p.y,w*.3,w*.08,0,0,Math.PI*2);ctx.stroke();
-      const scoops=Math.min(3,1+Math.floor(c.level/2));for(let i=0;i<scoops;i++){ctx.fillStyle=i%2?j.dark:j.color;ctx.beginPath();ctx.arc(p.x+(i-(scoops-1)/2)*w*.2,top+h*.35-(i%2)*w*.08,w*.23,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff8';ctx.stroke()}
-      ctx.fillStyle='#fff4dc';for(let i=0;i<3;i++){ctx.beginPath();ctx.arc(p.x+(i-1)*w*.11,top+h*(.18-i*.045),w*(.16-i*.02),0,Math.PI*2);ctx.fill()}garnish(c.level,p.x,top+h*.08,w);levelNumber(c.level,p.x,bowlY+w*.13,w)};
-    const drawWine=(c:Cup)=>{const p=project(c.x,c.y),j=LEVELS[c.level],w=c.r*2.3*p.scale,h=w*1.7,top=p.y-h;glassShadow(p.x,p.y,w);const bowl=new Path2D();bowl.moveTo(p.x-w*.48,top);bowl.bezierCurveTo(p.x-w*.42,top+h*.38,p.x-w*.24,top+h*.58,p.x,top+h*.62);bowl.bezierCurveTo(p.x+w*.24,top+h*.58,p.x+w*.42,top+h*.38,p.x+w*.48,top);bowl.closePath();
-      ctx.save();ctx.clip(bowl);if(c.level===6){const cols=['#ef4e62','#ff9e2f','#ffe050','#54c675','#48a9df','#8d60db'];cols.forEach((col,i)=>{ctx.fillStyle=col;ctx.fillRect(p.x-w*.5,top+h*.15+i*h*.07,w,h*.08)})}else{ctx.fillStyle=j.color;ctx.globalAlpha=.85;ctx.fillRect(p.x-w*.5,top+h*.23,w,h*.42);ctx.globalAlpha=1}ctx.restore();glassOutline(bowl);ctx.strokeStyle='#eaffffdf';ctx.lineWidth=2.2;ctx.beginPath();ctx.ellipse(p.x,top,w*.48,w*.13,0,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.moveTo(p.x,top+h*.61);ctx.lineTo(p.x,p.y-w*.08);ctx.ellipse(p.x,p.y,w*.34,w*.075,0,0,Math.PI*2);ctx.stroke();garnish(c.level,p.x,top,w);levelNumber(c.level,p.x,top+h*.4,w)};
-    const drawCup=(c:Cup)=>{const t=settingsRef.current.theme;if(t==='juice')drawJuice(c);else if(t==='sundae')drawSundae(c);else drawWine(c)};
 
-    const loop=(now:number)=>{
-      const dt=Math.min(2,(now-last)/16.67);last=now;const {w,h,dpr}=sizeRef.current,g=geom(),s=settingsRef.current;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
-      const bg=ctx.createLinearGradient(0,0,0,h);bg.addColorStop(0,'#9c6138');bg.addColorStop(.12,'#e7c184');bg.addColorStop(1,'#f7e6bd');ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);
-      ctx.fillStyle='#704027';ctx.fillRect(g.cx-g.farHalf-11,10,g.farHalf*2+22,42);ctx.fillStyle='#b57a46';ctx.fillRect(g.cx-g.farHalf,22,g.farHalf*2,29);ctx.fillStyle='#f7dfac';ctx.fillRect(g.cx-g.farHalf+10,34,g.farHalf*2-20,4);
-      const floor=new Path2D();floor.moveTo(g.cx-g.farHalf,g.farY);floor.lineTo(g.cx+g.farHalf,g.farY);floor.lineTo(g.cx+g.nearHalf,g.nearY);floor.lineTo(g.cx-g.nearHalf,g.nearY);floor.closePath();const fg=ctx.createLinearGradient(0,g.farY,0,g.nearY);fg.addColorStop(0,'#e8f1cc');fg.addColorStop(.52,'#f4e7ba');fg.addColorStop(1,'#f6dca6');ctx.fillStyle=fg;ctx.fill(floor);
-      for(let yy=35;yy<WORLD_H;yy+=68){const l=project(-WORLD_W/2,yy),r=project(WORLD_W/2,yy);ctx.strokeStyle='#b78f5b25';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(l.x,l.y);ctx.lineTo(r.x,r.y);ctx.stroke()}
-      ctx.fillStyle='#8b532f';ctx.beginPath();ctx.moveTo(g.cx-g.farHalf-8,g.farY);ctx.lineTo(g.cx-g.farHalf,g.farY);ctx.lineTo(g.cx-g.nearHalf,g.nearY);ctx.lineTo(g.cx-g.nearHalf-12,g.nearY);ctx.closePath();ctx.fill();ctx.beginPath();ctx.moveTo(g.cx+g.farHalf,g.farY);ctx.lineTo(g.cx+g.farHalf+8,g.farY);ctx.lineTo(g.cx+g.nearHalf+12,g.nearY);ctx.lineTo(g.cx+g.nearHalf,g.nearY);ctx.closePath();ctx.fill();ctx.strokeStyle='#ffe7af';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(g.cx-g.farHalf,g.farY);ctx.lineTo(g.cx-g.nearHalf,g.nearY);ctx.stroke();ctx.beginPath();ctx.moveTo(g.cx+g.farHalf,g.farY);ctx.lineTo(g.cx+g.nearHalf,g.nearY);ctx.stroke();
-      const danger=project(0,WORLD_H-72),dl=project(-WORLD_W/2,WORLD_H-72),dr=project(WORLD_W/2,WORLD_H-72);ctx.strokeStyle=now<safeUntilRef.current?'#3cae73aa':'#bd563f70';ctx.lineWidth=1.4;ctx.setLineDash([6,7]);ctx.beginPath();ctx.moveTo(dl.x,danger.y);ctx.lineTo(dr.x,danger.y);ctx.stroke();ctx.setLineDash([]);
-
-      if(runningRef.current){for(const c of cupsRef.current){c.ageMs+=dt*16.67;c.vy-=s.slope*dt;const f=Math.pow(s.drag,dt);c.vx*=f;c.vy*=f;c.x+=c.vx*dt;c.y+=c.vy*dt;if(c.x-c.r<-WORLD_W/2){c.x=-WORLD_W/2+c.r;c.vx=Math.abs(c.vx)*s.wallRest}else if(c.x+c.r>WORLD_W/2){c.x=WORLD_W/2-c.r;c.vx=-Math.abs(c.vx)*s.wallRest}if(c.y-c.r<0){c.y=c.r;c.vy=Math.abs(c.vy)*s.frontRest;c.vx*=.86}if(c.y+c.r>WORLD_H){c.y=WORLD_H-c.r;c.vy=-Math.abs(c.vy)*.08}if(c.y+c.r<WORLD_H-72)c.safeExited=true;if((c.safeExited||c.ageMs>900)&&c.y+c.r>WORLD_H-72)c.dangerMs+=dt*16.67;else c.dangerMs=0}}
-      const remove=new Set<number>(),add:Cup[]=[];const cups=cupsRef.current;
-      if(runningRef.current)for(let i=0;i<cups.length;i++)for(let k=i+1;k<cups.length;k++){
-        const a=cups[i],b=cups[k];if(remove.has(a.id)||remove.has(b.id))continue;const dx=b.x-a.x,dy=b.y-a.y,dist=Math.hypot(dx,dy)||.01,min=a.r+b.r;if(dist>=min)continue;const nx=dx/dist,ny=dy/dist,overlap=min-dist,ma=a.r*a.r,mb=b.r*b.r,total=ma+mb;a.x-=nx*overlap*(mb/total);a.y-=ny*overlap*(mb/total);b.x+=nx*overlap*(ma/total);b.y+=ny*overlap*(ma/total);
-        const rvx=b.vx-a.vx,rvy=b.vy-a.vy,nv=rvx*nx+rvy*ny;if(nv<0){const imp=-(1+s.cupRest)*nv/(1/ma+1/mb);a.vx-=imp*nx/ma;a.vy-=imp*ny/ma;b.vx+=imp*nx/mb;b.vy+=imp*ny/mb}
-        if(a.level===b.level){remove.add(a.id);remove.add(b.id);const x=(a.x+b.x)/2,y=(a.y+b.y)/2;if(a.level===6){
-            let cleared=0;for(const c of cups){if(remove.has(c.id)||c.id===a.id||c.id===b.id)continue;const ex=c.x-x,ey=c.y-y,d=Math.hypot(ex,ey)||1;if(d<s.blastRadius){if(c.level<=2){remove.add(c.id);cleared++}else if(c.level<6){const force=(1-d/s.blastRadius)*s.blastForce;c.vx+=ex/d*force;c.vy+=ey/d*force}}}burstsRef.current.push({x,y,life:1,color:'#ffd75c',maxR:s.blastRadius});award(5000+cleared*250);setOrders(v=>v+1);setLifetimeOrders(v=>{const n=v+1;localStorage.setItem('juice-orders',String(n));return n});signal(true);
-          }else{const nl=a.level+1;add.push({id:idRef.current++,x,y,vx:(a.vx*ma+b.vx*mb)/total,vy:(a.vy*ma+b.vy*mb)/total,level:nl,r:radiusFor(nl),dangerMs:0,ageMs:Math.max(a.ageMs,b.ageMs),safeExited:a.safeExited||b.safeExited});burstsRef.current.push({x,y,life:1,color:LEVELS[nl].color,maxR:52});award((nl+1)*120);setUnlocked(v=>Math.max(v,nl));signal(false)}}
+    const drawSimpleCup = (cup: Cup, theme: Theme) => {
+      const p = project(cup.x, cup.y);
+      const level = LEVELS[cup.level];
+      const kind = simpleKind(theme);
+      const w = cup.r * 2 * p.scale;
+      const h = w * (kind === 'wine' ? 1.8 : kind === 'sundae' ? 1.65 : 1.45);
+      const top = p.y - h;
+      ctx.save();
+      ctx.fillStyle = '#4a2d1b2d'; ctx.beginPath(); ctx.ellipse(p.x + 2, p.y + 2, w * 0.48, w * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+      if (kind === 'juice') {
+        const body = new Path2D();
+        body.moveTo(p.x - w * 0.48, top); body.lineTo(p.x - w * 0.33, p.y);
+        body.quadraticCurveTo(p.x, p.y + 2, p.x + w * 0.33, p.y); body.lineTo(p.x + w * 0.48, top); body.closePath();
+        ctx.fillStyle = level.color + 'df'; ctx.fill(body); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(body);
+        ctx.beginPath(); ctx.ellipse(p.x, top, w * 0.48, w * 0.13, 0, 0, Math.PI * 2); ctx.stroke(); garnish(cup.level, p.x, top, w);
+      } else if (kind === 'sundae') {
+        ctx.strokeStyle = '#efffff'; ctx.lineWidth = 2; ctx.beginPath();
+        ctx.moveTo(p.x - w * 0.46, top + h * 0.28); ctx.quadraticCurveTo(p.x - w * 0.35, top + h * 0.62, p.x, top + h * 0.68);
+        ctx.quadraticCurveTo(p.x + w * 0.35, top + h * 0.62, p.x + w * 0.46, top + h * 0.28); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(p.x, top + h * 0.68); ctx.lineTo(p.x, p.y - w * 0.08); ctx.ellipse(p.x, p.y, w * 0.32, w * 0.08, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = level.color; ctx.beginPath(); ctx.arc(p.x, top + h * 0.27, w * 0.28, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff4dc'; ctx.beginPath(); ctx.arc(p.x, top + h * 0.09, w * 0.18, 0, Math.PI * 2); ctx.fill(); garnish(cup.level, p.x, top, w);
+      } else {
+        const bowl = new Path2D(); bowl.moveTo(p.x - w * 0.47, top);
+        bowl.bezierCurveTo(p.x - w * 0.38, top + h * 0.36, p.x - w * 0.2, top + h * 0.56, p.x, top + h * 0.6);
+        bowl.bezierCurveTo(p.x + w * 0.2, top + h * 0.56, p.x + w * 0.38, top + h * 0.36, p.x + w * 0.47, top); bowl.closePath();
+        ctx.fillStyle = level.color + 'dd'; ctx.fill(bowl); ctx.strokeStyle = '#efffff'; ctx.lineWidth = 2; ctx.stroke(bowl);
+        ctx.beginPath(); ctx.moveTo(p.x, top + h * 0.6); ctx.lineTo(p.x, p.y - w * 0.08); ctx.ellipse(p.x, p.y, w * 0.34, w * 0.075, 0, 0, Math.PI * 2); ctx.stroke(); garnish(cup.level, p.x, top, w);
       }
-      if(remove.size)cupsRef.current=cupsRef.current.filter(c=>!remove.has(c.id)).concat(add);
-      recalcPred(now);if(runningRef.current&&s.aimLength>0){const paths=predictionRef.current.paths;paths.forEach((path,idx)=>{ctx.strokeStyle=paths.length===1?'#684423b5':idx===1?'#684423b5':'#d27a4650';ctx.lineWidth=idx===1||paths.length===1?2:5;ctx.setLineDash(idx===1||paths.length===1?[7,6]:[3,8]);ctx.beginPath();path.forEach((pt,n)=>{const q=project(pt.x,pt.y);n?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)});ctx.stroke()});ctx.setLineDash([])}
-      const ordered=[...cupsRef.current].sort((a,b)=>a.y-b.y);for(const c of ordered)drawCup(c);
-      for(const b of burstsRef.current){b.life-=.035*dt;const p=project(b.x,b.y),r=(1-b.life)*b.maxR*p.scale;ctx.globalAlpha=Math.max(0,b.life);ctx.strokeStyle=b.color;ctx.lineWidth=6;ctx.beginPath();ctx.arc(p.x,p.y-r*.2,r,0,Math.PI*2);ctx.stroke();for(let i=0;i<7;i++){const an=i/7*Math.PI*2,rr=r*1.15;ctx.fillStyle=i%2?'#fff1b0':b.color;ctx.beginPath();ctx.arc(p.x+Math.cos(an)*rr,p.y-r*.2+Math.sin(an)*rr,Math.max(2,5*b.life),0,Math.PI*2);ctx.fill()}ctx.globalAlpha=1}burstsRef.current=burstsRef.current.filter(b=>b.life>0);
-      if(runningRef.current){drawCup({id:-1,x:aimRef.current.x,y:WORLD_H-19,vx:0,vy:0,level:queueRef.current[0],r:radiusFor(queueRef.current[0]),dangerMs:0,ageMs:0,safeExited:false});if(s.angle&&aimRef.current.locked){const base=project(aimRef.current.x,WORLD_H-19),len=58,ex=base.x+Math.sin(aimRef.current.angle)*len,ey=base.y-Math.cos(aimRef.current.angle)*len;ctx.fillStyle='#fff';ctx.strokeStyle='#9e6237';ctx.lineWidth=2;ctx.beginPath();ctx.arc(ex,ey,7,0,Math.PI*2);ctx.fill();ctx.stroke()}}
-      if(runningRef.current&&performance.now()>safeUntilRef.current&&cupsRef.current.some(c=>c.dangerMs>=s.gameOverMs)){runningRef.current=false;setGameOver(true);signal(true)}
-      raf=requestAnimationFrame(loop);
-    };raf=requestAnimationFrame(loop);return()=>{cancelAnimationFrame(raf);ro.disconnect()};
-  },[award]);
+      if (settingsRef.current.levels) {
+        ctx.fillStyle = '#fff'; ctx.font = `900 ${Math.max(11, w * 0.28)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(cup.level + 1), p.x, top + h * 0.48);
+      }
+      ctx.restore();
+    };
+    const drawCup = (cup: Cup) => {
+      const theme = settingsRef.current.theme;
+      if (!isPremium(theme) || !drawPremiumCup(cup, theme)) drawSimpleCup(cup, theme);
+    };
+    const retreatDanger = (amount: number) => {
+      if (!settingsRef.current.dynamicDanger) return;
+      dangerLineRef.current = clamp(dangerLineRef.current + amount, DYNAMIC_DANGER_MIN, FIXED_DANGER);
+    };
 
-  const worldXFromScreen=(screenX:number,w:number)=>clamp((screenX-w/2)/(w*.48)*(WORLD_W/2),-WORLD_W/2+28,WORLD_W/2-28);
-  const powerFromGesture=(g:Gesture,releaseY:number)=>{const s=settingsRef.current,dist=Math.max(0,g.originY-releaseY),samples=g.samples.filter(v=>performance.now()-v.t<130),first=samples[0],last=samples[samples.length-1];const vel=first&&last&&last.t>first.t?(first.y-last.y)/((last.t-first.t)/1000):0,d=clamp((dist-s.throwThreshold)/(220-s.throwThreshold),0,1),v=clamp((vel-350)/1250,0,1);return 6.5+(d*.7+v*.3)*5.7};
-  const pointer=(e:React.PointerEvent<HTMLCanvasElement>,phase:'down'|'move'|'up')=>{
-    e.preventDefault();if(settingsOpen||!runningRef.current)return;const rect=e.currentTarget.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top,g=gestureRef.current,s=settingsRef.current,a=aimRef.current,now=performance.now();
-    if(phase==='down'){
-      const baseX=rect.width/2+(a.x/(WORLD_W/2))*(rect.width*.48),baseY=rect.height-22,handleX=baseX+Math.sin(a.angle)*70,handleY=baseY-Math.cos(a.angle)*70,nearHandle=Math.hypot(x-baseX,y-baseY)<60||Math.hypot(x-handleX,y-handleY)<55;
-      const mode:Gesture['mode']=s.angle?(a.locked&&!nearHandle?'throw':'setup'):'direct';Object.assign(g,{active:true,mode,pointerId:e.pointerId,originX:x,originY:y,lastX:x,lastY:y,positionLocked:false,samples:[{y,t:now}]});if(mode==='setup'||mode==='direct'){a.x=worldXFromScreen(x,rect.width);if(mode==='setup'&&!a.locked)a.angle=0}e.currentTarget.setPointerCapture(e.pointerId);return;
-    }
-    if(!g.active||g.pointerId!==e.pointerId)return;if(phase==='move'){
-      g.lastX=x;g.lastY=y;g.samples.push({y,t:now});g.samples=g.samples.filter(v=>now-v.t<160);const up=g.originY-y;
-      if(g.mode==='setup'){if(up<16&&!g.positionLocked)a.x=worldXFromScreen(x,rect.width);else{g.positionLocked=true;const baseX=rect.width/2+(a.x/(WORLD_W/2))*(rect.width*.48),baseY=rect.height-22,max=s.maxAngle*Math.PI/180;a.angle=clamp(Math.atan2(x-baseX,Math.max(5,baseY-y)),-max,max)}predictionRef.current.lastCalc=0}
-      if(g.mode==='direct'){if(up<18&&!g.positionLocked)a.x=worldXFromScreen(x,rect.width);else g.positionLocked=true;setPowerPreview(clamp(up/s.throwThreshold,0,1))}
-      if(g.mode==='throw'){const p=powerFromGesture(g,y);setPowerPreview(clamp((p-6.5)/5.7,0,1))}return;
-    }
-    if(phase==='up'){g.active=false;const forward=g.originY-y;if(g.mode==='setup'){a.locked=true;setAimLocked(true);predictionRef.current.lastCalc=0;setPowerPreview(0);return}if(forward>=s.throwThreshold){const p=s.power?powerFromGesture(g,y):s.fixedSpeed;fire(p)}else setPowerPreview(0)};
+    const loop = (now: number) => {
+      const dt = Math.min(1.25, (now - last) / 16.67);
+      last = now;
+      const { w, h, dpr } = sizeRef.current;
+      const active = settingsRef.current;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      const drewArt = art.lane ? drawCover(art.lane, w, h) : false;
+      if (!drewArt) {
+        const fallback = ctx.createLinearGradient(0, 0, 0, h);
+        fallback.addColorStop(0, '#9b6037'); fallback.addColorStop(0.22, '#efcf98'); fallback.addColorStop(1, '#f7e2b7');
+        ctx.fillStyle = fallback; ctx.fillRect(0, 0, w, h);
+      }
+      const shade = ctx.createLinearGradient(0, 0, 0, h);
+      shade.addColorStop(0, '#3b1e0917'); shade.addColorStop(0.22, '#fff0'); shade.addColorStop(1, '#6e3d1010');
+      ctx.fillStyle = shade; ctx.fillRect(0, 0, w, h);
+
+      if (runningRef.current) {
+        for (const cup of cupsRef.current) {
+          cup.ageMs += dt * 16.67;
+          cup.mergeLockMs = Math.max(0, cup.mergeLockMs - dt * 16.67);
+          cup.vy -= active.slope * dt;
+          const friction = Math.pow(active.drag, dt);
+          cup.vx *= friction; cup.vy *= friction; cup.x += cup.vx * dt; cup.y += cup.vy * dt;
+          if (cup.x - cup.r < -WORLD_W / 2) { cup.x = -WORLD_W / 2 + cup.r; cup.vx = Math.abs(cup.vx) * active.wallRest; }
+          else if (cup.x + cup.r > WORLD_W / 2) { cup.x = WORLD_W / 2 - cup.r; cup.vx = -Math.abs(cup.vx) * active.wallRest; }
+          if (cup.y - cup.r < 0) { cup.y = cup.r; cup.vy = Math.abs(cup.vy) * active.frontRest; cup.vx *= 0.88; }
+          if (cup.y + cup.r > WORLD_H) { cup.y = WORLD_H - cup.r; cup.vy = -Math.abs(cup.vy) * 0.08; }
+          if (cup.y + cup.r < dangerLineRef.current - 3) cup.safeExited = true;
+          const inDanger = cup.y + cup.r > dangerLineRef.current;
+          if ((cup.safeExited || cup.ageMs > 900) && inDanger) cup.dangerMs += dt * 16.67;
+          else cup.dangerMs = Math.max(0, cup.dangerMs - dt * 34);
+        }
+      }
+
+      const remove = new Set<number>();
+      const add: Cup[] = [];
+      const cups = cupsRef.current;
+      if (runningRef.current) {
+        for (let i = 0; i < cups.length; i += 1) for (let k = i + 1; k < cups.length; k += 1) {
+          const a = cups[i], b = cups[k];
+          if (remove.has(a.id) || remove.has(b.id)) continue;
+          const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy) || 0.01, min = a.r + b.r;
+          if (a.level === b.level && a.mergeLockMs <= 0 && b.mergeLockMs <= 0 && dist < min * MERGE_SENSOR) {
+            remove.add(a.id); remove.add(b.id);
+            const x = (a.x + b.x) / 2, y = (a.y + b.y) / 2;
+            const ma = a.r * a.r, mb = b.r * b.r, total = ma + mb;
+            if (a.level === 6) {
+              let cleared = 0;
+              for (const other of cups) {
+                if (remove.has(other.id)) continue;
+                const ex = other.x - x, ey = other.y - y, distance = Math.hypot(ex, ey) || 1;
+                if (distance >= active.blastRadius) continue;
+                if (other.level <= 2) { remove.add(other.id); cleared += 1; }
+                else if (other.level < 6) {
+                  const force = (1 - distance / active.blastRadius) * active.blastForce;
+                  other.vx += (ex / distance) * force; other.vy += (ey / distance) * force;
+                }
+              }
+              burstsRef.current.push({ x, y, life: 1, color: '#ffd75c', maxR: active.blastRadius });
+              award(5000 + cleared * 250); registerOrder(); retreatDanger(26); signal(true);
+            } else {
+              const nextLevel = a.level + 1;
+              add.push({ id: idRef.current++, x, y, vx: (a.vx * ma + b.vx * mb) / total,
+                vy: (a.vy * ma + b.vy * mb) / total, level: nextLevel, r: radiusFor(nextLevel),
+                dangerMs: 0, ageMs: Math.max(a.ageMs, b.ageMs), safeExited: a.safeExited || b.safeExited, mergeLockMs: 90 });
+              burstsRef.current.push({ x, y, life: 1, color: LEVELS[nextLevel].color, maxR: 52 });
+              award((nextLevel + 1) * 120);
+              unlockedRef.current = Math.max(unlockedRef.current, nextLevel); setUnlocked(unlockedRef.current);
+              // Every merge earns a little breathing room; only the level-7 blast
+              // creates a large reset, so ordinary chains cannot stall the danger line forever.
+              retreatDanger(2); signal(false);
+            }
+            continue;
+          }
+          if (dist >= min) continue;
+          const nx = dx / dist, ny = dy / dist, overlap = min - dist;
+          const ma = a.r * a.r, mb = b.r * b.r, total = ma + mb;
+          a.x -= nx * overlap * (mb / total); a.y -= ny * overlap * (mb / total);
+          b.x += nx * overlap * (ma / total); b.y += ny * overlap * (ma / total);
+          const normalVelocity = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+          if (normalVelocity < 0) {
+            const impulse = -(1 + active.cupRest) * normalVelocity / (1 / ma + 1 / mb);
+            a.vx -= impulse * nx / ma; a.vy -= impulse * ny / ma; b.vx += impulse * nx / mb; b.vy += impulse * ny / mb;
+          }
+        }
+      }
+      if (remove.size) {
+        cupsRef.current = cupsRef.current.filter((cup) => !remove.has(cup.id)).concat(add);
+        predictionRef.current.lastCalc = 0;
+      }
+
+      const lineLeft = project(-WORLD_W / 2, dangerLineRef.current), lineRight = project(WORLD_W / 2, dangerLineRef.current);
+      const pulse = 0.55 + Math.sin(now / 130) * 0.22;
+      ctx.strokeStyle = now < safeUntilRef.current ? '#43bf7cca' : `rgba(221,67,50,${pulse})`;
+      ctx.lineWidth = 2; ctx.setLineDash([8, 7]); ctx.beginPath(); ctx.moveTo(lineLeft.x, lineLeft.y); ctx.lineTo(lineRight.x, lineRight.y); ctx.stroke(); ctx.setLineDash([]);
+
+      recalcPrediction(now);
+      if (runningRef.current && active.aimLength > 0) {
+        const paths = predictionRef.current.paths;
+        paths.forEach((path, index) => {
+          const central = paths.length === 1 || index === 1;
+          ctx.strokeStyle = central ? '#fffdf4e8' : '#f7a25b73'; ctx.lineWidth = central ? 2.4 : 5; ctx.setLineDash(central ? [8, 7] : [3, 9]); ctx.beginPath();
+          path.forEach((point, pointIndex) => { const p = project(point.x, point.y); if (pointIndex) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); }); ctx.stroke();
+        });
+        ctx.setLineDash([]);
+      }
+      [...cupsRef.current].sort((a, b) => a.y - b.y).forEach(drawCup);
+      for (const burst of burstsRef.current) {
+        burst.life -= 0.035 * dt; const p = project(burst.x, burst.y); const radius = (1 - burst.life) * burst.maxR * p.scale;
+        ctx.globalAlpha = Math.max(0, burst.life); ctx.strokeStyle = burst.color; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.arc(p.x, p.y - radius * 0.2, radius, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      burstsRef.current = burstsRef.current.filter((burst) => burst.life > 0);
+
+      if (runningRef.current) {
+        drawCup({ id: -1, x: aimRef.current.x, y: WORLD_H - 18, vx: 0, vy: 0,
+          level: queueRef.current[0], r: radiusFor(queueRef.current[0]), dangerMs: 0,
+          ageMs: 0, safeExited: false, mergeLockMs: 0 });
+        if (active.angle) {
+          const base = project(aimRef.current.x, WORLD_H - 18), length = 68;
+          const hx = base.x + Math.sin(aimRef.current.angle) * length, hy = base.y - Math.cos(aimRef.current.angle) * length;
+          ctx.fillStyle = aimRef.current.locked ? '#46c887' : '#fff'; ctx.strokeStyle = '#6f442d'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(hx, hy, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+      }
+      if (runningRef.current && performance.now() > safeUntilRef.current && cupsRef.current.some((cup) => cup.dangerMs >= active.gameOverMs)) {
+        runningRef.current = false; setGameOver(true); signal(true);
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => { cancelAnimationFrame(raf); observer.disconnect(); };
+  }, [award, radiusFor, registerOrder, signal]);
+
+  const worldXFromScreen = (screenX: number, width: number) => clamp(
+    ((screenX - width / 2) / (width * 0.495)) * (WORLD_W / 2), -WORLD_W / 2 + 31, WORLD_W / 2 - 31);
+
+  const powerFromGesture = (gesture: Gesture, releaseY: number) => {
+    const active = settingsRef.current;
+    const distance = Math.max(0, gesture.originY - releaseY);
+    const samples = gesture.samples.filter((sample) => performance.now() - sample.t < 130);
+    const first = samples[0], last = samples[samples.length - 1];
+    const velocity = first && last && last.t > first.t ? (first.y - last.y) / ((last.t - first.t) / 1000) : 0;
+    const distanceFactor = clamp((distance - active.throwThreshold) / (220 - active.throwThreshold), 0, 1);
+    const velocityFactor = clamp((velocity - 350) / 1250, 0, 1);
+    const strength = distanceFactor * 0.7 + velocityFactor * 0.3;
+    const low = Math.min(active.minPower, active.maxPower), high = Math.max(active.minPower, active.maxPower);
+    return low + strength * (high - low);
   };
 
-  const patchSettings=(p:Partial<Settings>)=>setSettings(v=>({...v,...p}));
-  const preset=(kind:'stable'|'balanced'|'bounce')=>patchSettings(kind==='stable'?{wallRest:.4,cupRest:.06,drag:.978,slope:.014,fixedSpeed:7}:kind==='bounce'?{wallRest:.84,cupRest:.2,drag:.989,slope:.009,fixedSpeed:8.5}:{wallRest:.72,cupRest:.11,drag:.982,slope:.012,fixedSpeed:7.4});
+  const pointer = (event: React.PointerEvent<HTMLCanvasElement>, phase: 'down' | 'move' | 'up') => {
+    event.preventDefault();
+    if (settingsOpen || !runningRef.current) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    const gesture = gestureRef.current, active = settingsRef.current, aim = aimRef.current, now = performance.now();
+    const baseX = rect.width / 2 + (aim.x / (WORLD_W / 2)) * (rect.width * 0.495), baseY = rect.height * 0.972;
+    const handleX = baseX + Math.sin(aim.angle) * 68, handleY = baseY - Math.cos(aim.angle) * 68;
+    if (phase === 'down') {
+      let mode: GestureMode = 'direct';
+      if (active.angle) {
+        const nearCup = Math.hypot(x - baseX, y - baseY) < 62;
+        const nearHandle = Math.hypot(x - handleX, y - handleY) < 52;
+        const lengthSquared = Math.max(1, (handleX - baseX) ** 2 + (handleY - baseY) ** 2);
+        const t = clamp(((x - baseX) * (handleX - baseX) + (y - baseY) * (handleY - baseY)) / lengthSquared, 0, 1);
+        const nearLine = Math.hypot(x - (baseX + (handleX - baseX) * t), y - (baseY + (handleY - baseY) * t)) < 26;
+        if (nearCup) mode = 'position'; else if (nearHandle || nearLine || !aim.locked) mode = 'aim'; else mode = 'throw';
+      }
+      Object.assign(gesture, { active: true, mode, pointerId: event.pointerId, originX: x, originY: y,
+        lastX: x, lastY: y, positionLocked: false, samples: [{ y, t: now }] });
+      if (mode === 'position' || mode === 'direct') aim.x = worldXFromScreen(x, rect.width);
+      if (mode === 'aim') { aim.locked = false; setAimLocked(false); }
+      event.currentTarget.setPointerCapture(event.pointerId); predictionRef.current.lastCalc = 0; return;
+    }
+    if (!gesture.active || gesture.pointerId !== event.pointerId) return;
+    if (phase === 'move') {
+      gesture.lastX = x; gesture.lastY = y; gesture.samples.push({ y, t: now });
+      gesture.samples = gesture.samples.filter((sample) => now - sample.t < 160);
+      const upward = gesture.originY - y;
+      if (gesture.mode === 'position') aim.x = worldXFromScreen(x, rect.width);
+      else if (gesture.mode === 'aim') {
+        const updatedBaseX = rect.width / 2 + (aim.x / (WORLD_W / 2)) * (rect.width * 0.495);
+        const max = active.maxAngle * Math.PI / 180;
+        aim.angle = clamp(Math.atan2(x - updatedBaseX, Math.max(5, baseY - y)), -max, max);
+      } else if (gesture.mode === 'direct') {
+        if (upward < 18 && !gesture.positionLocked) aim.x = worldXFromScreen(x, rect.width); else gesture.positionLocked = true;
+        setPowerPreview(clamp(upward / active.throwThreshold, 0, 1));
+      } else {
+        const strength = powerFromGesture(gesture, y), low = Math.min(active.minPower, active.maxPower), high = Math.max(active.minPower, active.maxPower);
+        setPowerPreview(clamp((strength - low) / Math.max(0.1, high - low), 0, 1));
+      }
+      predictionRef.current.lastCalc = 0; return;
+    }
+    gesture.active = false;
+    const forward = gesture.originY - y;
+    if (gesture.mode === 'position') return;
+    if (gesture.mode === 'aim') { aim.locked = true; setAimLocked(true); predictionRef.current.lastCalc = 0; return; }
+    if (forward >= active.throwThreshold) fire(active.power ? powerFromGesture(gesture, y) : active.fixedSpeed);
+    else setPowerPreview(0);
+  };
+
+  const toggleAimLock = () => {
+    if (!settings.angle) return;
+    aimRef.current.locked = !aimRef.current.locked;
+    setAimLocked(aimRef.current.locked);
+    predictionRef.current.lastCalc = 0;
+  };
+  const patchSettings = (patch: Partial<Settings>) => {
+    if (patch.dynamicDanger !== undefined) {
+      dangerLineRef.current = patch.dynamicDanger ? DYNAMIC_DANGER_START : FIXED_DANGER;
+      cupsRef.current.forEach((cup) => { cup.dangerMs = 0; });
+    }
+    if (patch.angle !== undefined) resetAim(lastLaunchXRef.current);
+    setSettings((current) => ({ ...current, ...patch }));
+  };
+  const preset = (kind: 'stable' | 'balanced' | 'extreme') => {
+    if (kind === 'stable') patchSettings({ wallRest: 0.4, cupRest: 0.07, drag: 0.978, slope: 0.014, fixedSpeed: 7 });
+    else if (kind === 'balanced') patchSettings({ wallRest: 0.72, cupRest: 0.12, drag: 0.984, slope: 0.011, fixedSpeed: 7.7 });
+    else patchSettings({ wallRest: 0.96, cupRest: 0.3, drag: 0.993, slope: 0.006, fixedSpeed: 9.4, minPower: 6.8, maxPower: 14.5 });
+  };
+
   return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲">
-    <header className="hud"><div className="score-main"><small>分數</small><strong>{score.toLocaleString()}</strong><em>最高 {best.toLocaleString()} ・零復活 {bestClean.toLocaleString()}</em></div><div className="orders"><small>訂單</small><b>{orders}</b><em>累積 {lifetimeOrders}</em></div><div className="queue"><CupPreview label="下一杯" level={queue[0]} theme={settings.theme}/><i>›</i><CupPreview label="再下一杯" level={queue[1]} theme={settings.theme}/></div><button onClick={()=>setSettingsOpen(true)} aria-label="開啟設定">⚙</button></header>
-    <div className="playfield"><canvas ref={canvasRef} onPointerDown={e=>pointer(e,'down')} onPointerMove={e=>pointer(e,'move')} onPointerUp={e=>pointer(e,'up')} onPointerCancel={e=>pointer(e,'up')} aria-label="定位、瞄準並投擲杯子"/>
-      <div className="field-badges"><span>已投 {shots}</span>{revives>0&&<span>復活 {revives}</span>}</div>{settings.angle&&<div className={`aim-state ${aimLocked?'locked':''}`}>{aimLocked?'角度已鎖定・向前滑動投擲':'拖動杯子定位並瞄準'}</div>}
-      {powerPreview>0&&<div className="power-meter"><i style={{height:`${Math.max(8,powerPreview*100)}%`}}/><span>{settings.power?'力度':'有效'}</span></div>}
-      {gameOver&&<div className="game-over"><small>杯子越過危險線</small><h2>{score.toLocaleString()}</h2><p>本局訂單 {orders} ・復活 {revives} 次</p><div><button onClick={revive}>復活</button><button className="secondary" onClick={reset}>結算重來</button></div></div>}
+    <header className="hud">
+      <div className="score-main hud-tile"><small>分數</small><strong>{score.toLocaleString()}</strong><em>最高 {best.toLocaleString()}・零復活 {bestClean.toLocaleString()}</em></div>
+      <div className="orders hud-tile"><small>訂單</small><b>{orders}</b><em>累積 {lifetimeOrders}</em></div>
+      <div className="queue hud-tile"><CupPreview label="下一杯" level={queue[0]} theme={settings.theme}/><i>›</i><CupPreview label="再下一杯" level={queue[1]} theme={settings.theme}/></div>
+      <div className="shots hud-tile"><small>已投</small><b>{shots}</b></div>
+      <button className="settings-button" onClick={() => setSettingsOpen(true)} aria-label="開啟設定">⚙</button>
+    </header>
+    <div className="playfield">
+      <canvas ref={canvasRef} onPointerDown={(e) => pointer(e, 'down')} onPointerMove={(e) => pointer(e, 'move')} onPointerUp={(e) => pointer(e, 'up')} onPointerCancel={(e) => pointer(e, 'up')} aria-label="定位、瞄準並投擲杯子"/>
+      <div className="field-badges">
+        {historyCount > 0 && <button onClick={undo} aria-label={`復原上一步，尚有 ${historyCount} 次`}>↶ <small>{historyCount}</small></button>}
+        {revives > 0 && <span>復活 {revives}</span>}
+        {settings.dynamicDanger && <span className="danger-mode">動態線</span>}
+      </div>
+      {settings.angle && <button className={`aim-state ${aimLocked ? 'locked' : ''}`} onClick={toggleAimLock}>{aimLocked ? '角度已鎖定・點此解鎖' : '拖曳杯子或瞄準線・點此鎖定'}</button>}
+      {powerPreview > 0 && <div className="power-meter"><i style={{ height: `${Math.max(8, powerPreview * 100)}%` }}/><span>{settings.power ? '力度' : '有效'}</span></div>}
+      {gameOver && <div className="game-over"><small>杯子越過危險線</small><h2>{score.toLocaleString()}</h2><p>本局訂單 {orders}・復活 {revives} 次</p><div>
+        {historyCount > 0 && <button className="undo-action" onClick={undo}>復原</button>}<button onClick={revive}>復活</button><button className="secondary" onClick={() => reset()}>重來</button>
+      </div></div>}
     </div>
-    <section className="merge-strip"><div className="strip-label"><b>融合</b><small>{unlocked+1}/7</small></div>{LEVELS.map((l,i)=><div className={`mini-level ${i<=unlocked?'':'future'}`} key={l.name} title={l.name}><span style={{'--juice':l.color,'--dark':l.dark} as React.CSSProperties}>{themeIcon(settings.theme)}</span>{i<6&&<i>›</i>}</div>)}<div className="blast-mark" title="最高級爆炸">💥</div></section>
-    {settingsOpen&&<SettingsSheet s={settings} close={()=>setSettingsOpen(false)} patch={patchSettings} preset={preset}/>} 
+    <section className="merge-strip"><div className="strip-label"><b>融合</b><small>{unlocked + 1}/7</small></div>
+      {LEVELS.map((level, index) => <div className={`mini-level ${index <= unlocked ? '' : 'future'}`} key={level.name} title={level.name}><CupIcon level={index} theme={settings.theme}/>{index < 6 && <i>›</i>}</div>)}
+      <div className="blast-mark" title="最高級爆炸">💥</div>
+    </section>
+    {settingsOpen && <SettingsSheet settings={settings} close={() => setSettingsOpen(false)} patch={patchSettings} preset={preset}/>}
   </section></main>;
 }
 
-function CupPreview({label,level,theme}:{label:string;level:number;theme:Theme}){const l=LEVELS[level];return <div className="cup-preview"><small>{label}</small><span style={{'--juice':l.color,'--dark':l.dark} as React.CSSProperties}>{themeIcon(theme)}</span></div>}
-function Toggle({title,note,value,onChange}:{title:string;note:string;value:boolean;onChange:(v:boolean)=>void}){return <label className="setting-row"><span><b>{title}</b><small>{note}</small></span><input type="checkbox" checked={value} onChange={e=>onChange(e.target.checked)}/><i/></label>}
-function Slider({title,value,min,max,step=1,unit='',onChange}:{title:string;value:number;min:number;max:number;step?:number;unit?:string;onChange:(v:number)=>void}){return <label className="slider-row"><span><b>{title}</b><output>{Number.isInteger(value)?value:value.toFixed(2)}{unit}</output></span><input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(Number(e.target.value))}/></label>}
-function SettingsSheet({s,close,patch,preset}:{s:Settings;close:()=>void;patch:(p:Partial<Settings>)=>void;preset:(k:'stable'|'balanced'|'bounce')=>void}){return <div className="modal-backdrop" onPointerDown={e=>{if(e.target===e.currentTarget)close()}}><section className="settings-sheet" role="dialog" aria-modal="true" aria-label="遊戲設定"><header><div><small>遊戲設定</small><h2>玩法與外觀</h2></div><button onClick={close} aria-label="關閉設定">×</button></header><div className="sheet-scroll">
-    <div className="theme-picker"><button className={s.theme==='juice'?'active':''} onClick={()=>patch({theme:'juice'})}>🥤<span>果汁杯</span></button><button className={s.theme==='sundae'?'active':''} onClick={()=>patch({theme:'sundae'})}>🍨<span>聖代杯</span></button><button className={s.theme==='wine'?'active':''} onClick={()=>patch({theme:'wine'})}>🍷<span>高腳杯</span></button></div>
-    <div className="setting-group"><Toggle title="角度瞄準" note="先定位瞄準，再向前滑動投擲" value={s.angle} onChange={v=>patch({angle:v})}/><Toggle title="力度控制" note="距離 70%＋平均速度 30%" value={s.power} onChange={v=>patch({power:v})}/><Toggle title="顯示杯子等級" note="在杯身顯示 1～7" value={s.levels} onChange={v=>patch({levels:v})}/><Toggle title="顯示反彈路徑" note="使用斜坡物理預測軌跡" value={s.bounces} onChange={v=>patch({bounces:v})}/><Toggle title="音效" note="融合、爆炸與投擲音效" value={s.sound} onChange={v=>patch({sound:v})}/><Toggle title="震動" note="預設關閉，可隨時開啟" value={s.vibration} onChange={v=>patch({vibration:v})}/><Slider title="瞄準線長度" value={s.aimLength} min={0} max={3000} step={100} onChange={v=>patch({aimLength:v})}/><Slider title="投擲有效距離" value={s.throwThreshold} min={30} max={100} step={5} unit="px" onChange={v=>patch({throwThreshold:v})}/></div>
-    <details className="developer"><summary>開發者專區 <span>調整遊戲手感</span></summary><div className="presets"><button onClick={()=>preset('stable')}>穩定堆積</button><button onClick={()=>preset('balanced')}>平衡玩法</button><button onClick={()=>preset('bounce')}>高彈撞牆</button><button onClick={()=>patch(DEFAULTS)}>恢復預設</button></div><Slider title="最大角度" value={s.maxAngle} min={30} max={85} unit="°" onChange={v=>patch({maxAngle:v})}/><Slider title="固定力量" value={s.fixedSpeed} min={5.5} max={11} step={.1} onChange={v=>patch({fixedSpeed:v})}/><Slider title="左右牆反彈" value={s.wallRest} min={.1} max={.85} step={.01} onChange={v=>patch({wallRest:v})}/><Slider title="前方牆反彈" value={s.frontRest} min={0} max={.5} step={.01} onChange={v=>patch({frontRest:v})}/><Slider title="杯子互撞反彈" value={s.cupRest} min={0} max={.5} step={.01} onChange={v=>patch({cupRest:v})}/><Slider title="速度衰減" value={s.drag} min={.96} max={.995} step={.001} onChange={v=>patch({drag:v})}/><Slider title="斜坡重力" value={s.slope} min={0} max={.03} step={.001} onChange={v=>patch({slope:v})}/><Slider title="杯子尺寸" value={s.size} min={.8} max={1.25} step={.01} onChange={v=>patch({size:v})}/><Slider title="結束等待" value={s.gameOverMs} min={300} max={2500} step={100} unit="ms" onChange={v=>patch({gameOverMs:v})}/><Slider title="爆炸範圍" value={s.blastRadius} min={80} max={210} step={5} onChange={v=>patch({blastRadius:v})}/><Slider title="爆炸推力" value={s.blastForce} min={1} max={8} step={.2} onChange={v=>patch({blastForce:v})}/></details>
-  </div><button className="done-button" onClick={close}>完成</button></section></div>}
+function CupIcon({ level, theme }: { level: number; theme: Theme }) {
+  const asset = PREMIUM_ASSETS[theme];
+  if (asset) return <span className="sprite-icon" style={{ backgroundImage: `url(${asset})`, backgroundSize: '700% 100%', backgroundPosition: `${level / 6 * 100}% center` }}/>;
+  const info = LEVELS[level];
+  return <span className="simple-icon" style={{ '--juice': info.color, '--dark': info.dark } as React.CSSProperties}>{themeEmoji(theme)}</span>;
+}
+
+function CupPreview({ label, level, theme }: { label: string; level: number; theme: Theme }) {
+  return <div className="cup-preview"><small>{label}</small><CupIcon level={level} theme={theme}/></div>;
+}
+
+function Toggle({ title, note, value, onChange }: { title: string; note: string; value: boolean; onChange: (value: boolean) => void }) {
+  return <label className="setting-row"><span><b>{title}</b><small>{note}</small></span><input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)}/><i/></label>;
+}
+
+function Slider({ title, value, min, max, step = 1, unit = '', onChange }: { title: string; value: number; min: number; max: number; step?: number; unit?: string; onChange: (value: number) => void }) {
+  return <label className="slider-row"><span><b>{title}</b><output>{Number.isInteger(value) ? value : value.toFixed(2)}{unit}</output></span><input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))}/></label>;
+}
+
+function ThemeButton({ value, current, title, patch }: { value: Theme; current: Theme; title: string; patch: (patch: Partial<Settings>) => void }) {
+  return <button className={current === value ? 'active' : ''} onClick={() => patch({ theme: value })}><CupIcon level={value.startsWith('premium') ? 6 : 2} theme={value}/><span>{title}</span></button>;
+}
+
+function SettingsSheet({ settings, close, patch, preset }: { settings: Settings; close: () => void; patch: (patch: Partial<Settings>) => void; preset: (kind: 'stable' | 'balanced' | 'extreme') => void }) {
+  return <div className="modal-backdrop" onPointerDown={(e) => { if (e.target === e.currentTarget) close(); }}><section className="settings-sheet" role="dialog" aria-modal="true" aria-label="遊戲設定">
+    <header><div><small>遊戲設定</small><h2>玩法與外觀</h2></div><button onClick={close} aria-label="關閉設定">×</button></header>
+    <div className="sheet-scroll">
+      <div className="theme-picker">
+        <ThemeButton value="premiumJuice" current={settings.theme} title="精緻果汁" patch={patch}/><ThemeButton value="premiumSundae" current={settings.theme} title="精緻聖代" patch={patch}/><ThemeButton value="premiumWine" current={settings.theme} title="精緻酒杯" patch={patch}/>
+        <ThemeButton value="simpleJuice" current={settings.theme} title="果汁陽春" patch={patch}/><ThemeButton value="simpleSundae" current={settings.theme} title="聖代陽春" patch={patch}/><ThemeButton value="simpleWine" current={settings.theme} title="酒杯陽春" patch={patch}/>
+      </div>
+      <div className="setting-group">
+        <Toggle title="動態危險線" note="未融合會推進，融合與訂單會退回" value={settings.dynamicDanger} onChange={(v) => patch({ dynamicDanger: v })}/>
+        <Toggle title="角度瞄準" note="杯子調位置、瞄準線調角度、二次滑動投擲" value={settings.angle} onChange={(v) => patch({ angle: v })}/>
+        <Toggle title="力度控制" note="距離 70%＋平均速度 30%" value={settings.power} onChange={(v) => patch({ power: v })}/>
+        <Toggle title="顯示杯子等級" note="在杯身顯示 1～7" value={settings.levels} onChange={(v) => patch({ levels: v })}/>
+        <Toggle title="顯示反彈路徑" note="使用斜坡物理預測軌跡" value={settings.bounces} onChange={(v) => patch({ bounces: v })}/>
+        <Toggle title="音效" note="融合、爆炸與投擲音效" value={settings.sound} onChange={(v) => patch({ sound: v })}/>
+        <Toggle title="震動" note="預設關閉，可隨時開啟" value={settings.vibration} onChange={(v) => patch({ vibration: v })}/>
+        <Slider title="瞄準線長度" value={settings.aimLength} min={0} max={3000} step={100} onChange={(v) => patch({ aimLength: v })}/>
+        <Slider title="最小力度" value={settings.minPower} min={4.5} max={12} step={0.1} onChange={(v) => patch({ minPower: Math.min(v, settings.maxPower - 0.1) })}/>
+        <Slider title="最大力度" value={settings.maxPower} min={6} max={15} step={0.1} onChange={(v) => patch({ maxPower: Math.max(v, settings.minPower + 0.1) })}/>
+        <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(v) => patch({ throwThreshold: v })}/>
+      </div>
+      <details className="developer"><summary>開發者專區 <span>調整遊戲手感</span></summary><div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>平衡玩法</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復新版預設</button></div>
+        <Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(v) => patch({ maxAngle: v })}/><Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={12} step={0.1} onChange={(v) => patch({ fixedSpeed: v })}/><Slider title="左右牆反彈" value={settings.wallRest} min={0.1} max={0.98} step={0.01} onChange={(v) => patch({ wallRest: v })}/><Slider title="前方牆反彈" value={settings.frontRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ frontRest: v })}/><Slider title="杯子互撞反彈" value={settings.cupRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ cupRest: v })}/><Slider title="速度衰減" value={settings.drag} min={0.96} max={0.995} step={0.001} onChange={(v) => patch({ drag: v })}/><Slider title="斜坡重力" value={settings.slope} min={0} max={0.03} step={0.001} onChange={(v) => patch({ slope: v })}/><Slider title="杯子尺寸" value={settings.size} min={0.8} max={1.25} step={0.01} onChange={(v) => patch({ size: v })}/><Slider title="結束等待" value={settings.gameOverMs} min={300} max={2500} step={100} unit="ms" onChange={(v) => patch({ gameOverMs: v })}/><Slider title="爆炸範圍" value={settings.blastRadius} min={80} max={210} step={5} onChange={(v) => patch({ blastRadius: v })}/><Slider title="爆炸推力" value={settings.blastForce} min={1} max={8} step={0.2} onChange={(v) => patch({ blastForce: v })}/>
+      </details>
+    </div><button className="done-button" onClick={close}>完成</button>
+  </section></div>;
+}
