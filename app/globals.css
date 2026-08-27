@@ -627,15 +627,35 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .developer { margin-top: 8px; }
 
-.developer summary {
+.developer > summary {
   padding: 12px;
   font-size: 11px;
   font-weight: 900;
   cursor: pointer;
 }
 
-.developer summary span { float: right; color: #a07860; font-size: 7px; font-weight: 500; }
-.developer[open] summary { border-bottom: 1px solid #f0e2cf; }
+.developer > summary span { float: right; color: #a07860; font-size: 7px; font-weight: 500; }
+.developer[open] > summary { border-bottom: 1px solid #f0e2cf; }
+
+.level-sizes {
+  margin: 7px 8px;
+  overflow: hidden;
+  border: 1px solid #ead5b8;
+  border-radius: 11px;
+  background: #fffaf2;
+}
+
+.level-sizes summary {
+  padding: 10px;
+  color: #80533a;
+  font-size: 9px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.level-sizes summary span { float: right; color: #a07860; font-size: 7px; font-weight: 500; }
+.level-sizes[open] summary { border-bottom: 1px solid #eedec8; }
+.level-sizes .slider-row:last-child { border-bottom: 0; }
 
 .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 8px; }
 

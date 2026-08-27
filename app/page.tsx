@@ -43,7 +43,7 @@ const THEME_LEVEL_NAMES = {
   wine: ['水晶蘇打', '薰衣草氣泡', '玫瑰荔枝', '蝶豆星空', '翡翠香草', '紅寶石石榴', '極光銀河杯'],
 };
 
-const SIZE_CURVE = [1, 1.1, 1.16, 1.31, 1.48, 1.68, 1.92];
+const DEFAULT_LEVEL_SIZES = [1, 1.1, 1.16, 1.4, 1.68, 2, 2.3];
 
 type Theme =
   | 'premiumJuice'
@@ -99,6 +99,7 @@ type Settings = {
   angle: boolean;
   power: boolean;
   levels: boolean;
+  occlusionCues: boolean;
   dynamicDanger: boolean;
   theme: Theme;
   aimLength: number;
@@ -118,6 +119,7 @@ type Settings = {
   drag: number;
   slope: number;
   size: number;
+  levelSizes: number[];
   throwThreshold: number;
   gameOverMs: number;
   blastRadius: number;
@@ -136,6 +138,7 @@ const DEFAULTS: Settings = {
   angle: false,
   power: false,
   levels: false,
+  occlusionCues: true,
   dynamicDanger: false,
   theme: 'premiumJuice',
   aimLength: 2000,
@@ -155,6 +158,7 @@ const DEFAULTS: Settings = {
   drag: 0.994,
   slope: 0.01,
   size: 1,
+  levelSizes: [...DEFAULT_LEVEL_SIZES],
   throwThreshold: 65,
   gameOverMs: 1400,
   blastRadius: 138,
@@ -292,6 +296,7 @@ export default function Home() {
   const pausedRef = useRef(false);
   const manualPauseRef = useRef(false);
   const roundSizeRef = useRef(DEFAULTS.size);
+  const roundLevelSizesRef = useRef([...DEFAULT_LEVEL_SIZES]);
   const safeUntilRef = useRef(0);
   const lastShotRef = useRef(0);
   const dangerLineRef = useRef(DYNAMIC_DANGER_START);
@@ -383,6 +388,7 @@ export default function Home() {
     pausedRef.current = false;
     manualPauseRef.current = false;
     roundSizeRef.current = active.size;
+    roundLevelSizesRef.current = [...active.levelSizes];
     safeUntilRef.current = 0;
     revivesRef.current = 0;
     bagRef.current = [];
@@ -413,7 +419,13 @@ export default function Home() {
     let loaded = DEFAULTS;
     const raw = localStorage.getItem('juice-v43-settings');
     if (raw) {
-      try { loaded = { ...DEFAULTS, ...JSON.parse(raw) }; } catch { /* ignore */ }
+      try {
+        const stored = JSON.parse(raw) as Partial<Settings>;
+        const storedLevelSizes = Array.isArray(stored.levelSizes) && stored.levelSizes.length === LEVELS.length
+          ? stored.levelSizes.map((value, index) => clamp(Number(value) || DEFAULT_LEVEL_SIZES[index], 0.6, 3))
+          : [...DEFAULT_LEVEL_SIZES];
+        loaded = { ...DEFAULTS, ...stored, levelSizes: storedLevelSizes };
+      } catch { /* ignore */ }
     }
     settingsRef.current = loaded;
     setSettings(loaded);
@@ -465,7 +477,7 @@ export default function Home() {
   }, []);
 
   const radiusFor = useCallback((level: number) =>
-    28.5 * SIZE_CURVE[level] * roundSizeRef.current, []);
+    28.5 * (roundLevelSizesRef.current[level] ?? DEFAULT_LEVEL_SIZES[level]) * roundSizeRef.current, []);
 
   const award = useCallback((points: number) => {
     const next = scoreRef.current + points;
@@ -743,7 +755,7 @@ export default function Home() {
     };
     const drawOcclusionCues = (cups: Cup[]) => {
       const theme = settingsRef.current.theme;
-      if (!isPremium(theme) || cups.length < 2) return;
+      if (!settingsRef.current.occlusionCues || !isPremium(theme) || cups.length < 2) return;
       const metrics = cups.map((cup) => premiumVisualMetrics(cup, theme));
       cups.forEach((cup, index) => {
         const rear = metrics[index];
@@ -1186,7 +1198,7 @@ export default function Home() {
       fixedSpeed: 8, minPower: 7, maxPower: 14, sleepSpeed: 0.1, sleepDelayMs: 320,
       contactSlop: 0.55, bounceCutoff: 0.75, wakeImpulse: 0.6, mergeSettleMs: 190, gameOverMs: 1500 });
     else if (kind === 'balanced') patchSettings({ wallRest: 0.91, frontRest: 0.12, cupRest: 0.22, drag: 0.994, slope: 0.01,
-      size: 1, fixedSpeed: 9, minPower: 10, maxPower: 16, sleepSpeed: 0.08, sleepDelayMs: 420,
+      size: 1, levelSizes: [...DEFAULT_LEVEL_SIZES], fixedSpeed: 9, minPower: 10, maxPower: 16, sleepSpeed: 0.08, sleepDelayMs: 420,
       contactSlop: 0.45, bounceCutoff: 0.55, wakeImpulse: 0.45, mergeSettleMs: 160,
       dangerPenetration: 0.32, returnSpeed: 0.8, gameOverMs: 1400 });
     else patchSettings({ wallRest: 0.98, cupRest: 0.3, drag: 0.994, slope: 0.006,
@@ -1276,6 +1288,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
           min={0} max={40} step={1} unit="px" onChange={(v) => patch({ straightLockDistance: v })}/>}
         <Toggle title="力度控制" note="距離 70%＋平均速度 30%" value={settings.power} onChange={(v) => patch({ power: v })}/>
         <Toggle title="顯示杯子等級" note="在杯身顯示 1～7" value={settings.levels} onChange={(v) => patch({ levels: v })}/>
+        <Toggle title="後排杯口光環" note="杯子被前排遮擋時顯示辨識提示" value={settings.occlusionCues} onChange={(v) => patch({ occlusionCues: v })}/>
         <Toggle title="顯示反彈路徑" note="使用斜坡物理預測軌跡" value={settings.bounces} onChange={(v) => patch({ bounces: v })}/>
         <Toggle title="音效" note="融合、爆炸與投擲音效" value={settings.sound} onChange={(v) => patch({ sound: v })}/>
         <Toggle title="震動" note="預設關閉，可隨時開啟" value={settings.vibration} onChange={(v) => patch({ vibration: v })}/>
@@ -1302,6 +1315,14 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="危險線深入比例" value={settings.dangerPenetration} min={0.1} max={0.8} step={0.02} onChange={(v) => patch({ dangerPenetration: v })}/>
         <Slider title="高速回收門檻" value={settings.returnSpeed} min={0.2} max={4} step={0.1} onChange={(v) => patch({ returnSpeed: v })}/>
         <Slider title="杯子尺寸（下一局）" value={settings.size} min={0.6} max={1.6} step={0.01} onChange={(v) => patch({ size: v })}/>
+        <details className="level-sizes"><summary>各級杯子物理比例 <span>下一局套用</span></summary><div>
+          {settings.levelSizes.map((value, index) => <Slider key={index} title={`等級 ${index + 1} 比例`} value={value}
+            min={0.6} max={3} step={0.01} onChange={(nextValue) => {
+              const next = [...settings.levelSizes];
+              next[index] = nextValue;
+              patch({ levelSizes: next });
+            }}/>) }
+        </div></details>
         <Slider title="穩定堆積結束等待" value={settings.gameOverMs} min={500} max={3000} step={100} unit="ms" onChange={(v) => patch({ gameOverMs: v })}/>
         <Slider title="爆炸範圍" value={settings.blastRadius} min={80} max={210} step={5} onChange={(v) => patch({ blastRadius: v })}/>
         <Slider title="爆炸推力" value={settings.blastForce} min={1} max={8} step={0.2} onChange={(v) => patch({ blastForce: v })}/>
