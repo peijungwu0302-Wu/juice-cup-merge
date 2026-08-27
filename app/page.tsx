@@ -37,6 +37,12 @@ const LEVELS = [
   { name: '彩虹果昔', color: '#55dbe0', dark: '#14889f' },
 ];
 
+const THEME_LEVEL_NAMES = {
+  juice: ['蜂蜜檸檬', '陽光柳橙', '草莓冰飲', '巨峰葡萄', '青蘋果薄荷', '西瓜冰飲', '彩虹果汁皇冠'],
+  sundae: ['香草牛奶', '焦糖布丁', '抹茶紅豆', '餅乾可可', '藍莓起司', '黑森林巧克力', '皇家夢幻聖代'],
+  wine: ['水晶蘇打', '薰衣草氣泡', '玫瑰荔枝', '蝶豆星空', '翡翠香草', '紅寶石石榴', '極光銀河杯'],
+};
+
 const SIZE_CURVE = [1, 1.1, 1.16, 1.31, 1.48, 1.68, 1.92];
 
 type Theme =
@@ -48,32 +54,37 @@ type Theme =
   | 'simpleWine';
 
 const PREMIUM_ASSETS: Partial<Record<Theme, string>> = {
-  premiumJuice: '/assets/cups-juice-premium-v1.png',
-  premiumSundae: '/assets/cups-sundae-premium-v1.png',
-  premiumWine: '/assets/cups-wine-premium-v1.png',
+  premiumJuice: '/assets/cups-juice-premium-v2.png',
+  premiumSundae: '/assets/cups-sundae-premium-v2.png',
+  premiumWine: '/assets/cups-wine-premium-v2.png',
 };
 
 type Bounds = [number, number, number, number];
 const SPRITE_BOUNDS: Partial<Record<Theme, Bounds[]>> = {
   premiumJuice: [
-    [47, 193, 310, 658], [0, 120, 311, 660], [0, 104, 310, 656],
-    [0, 55, 310, 684], [0, 23, 290, 670], [9, 30, 273, 666], [3, 67, 296, 657],
+    [18, 340, 250, 706], [312, 217, 545, 711], [577, 257, 794, 711],
+    [842, 160, 1129, 714], [1129, 101, 1426, 714], [1426, 81, 1735, 715], [1753, 13, 2067, 715],
   ],
   premiumSundae: [
-    [23, 21, 304, 705], [1, 19, 304, 673], [15, 45, 288, 675],
-    [15, 213, 300, 675], [5, 15, 274, 675], [1, 23, 269, 701], [17, 23, 292, 693],
+    [21, 520, 195, 899], [214, 468, 430, 901], [430, 417, 669, 902],
+    [669, 329, 907, 902], [907, 273, 1146, 903], [1146, 187, 1389, 903], [1389, 11, 1667, 906],
   ],
   premiumWine: [
-    [15, 23, 293, 740], [0, 33, 292, 740], [0, 43, 293, 740],
-    [0, 47, 292, 738], [0, 53, 293, 739], [0, 33, 292, 740], [0, 10, 283, 744],
+    [17, 436, 184, 802], [208, 287, 386, 803], [408, 289, 612, 806],
+    [624, 188, 831, 807], [856, 111, 1084, 807], [1084, 80, 1325, 807], [1334, 118, 1666, 808],
   ],
 };
 
-// Premium art is normalized visually to the same theme-independent physics diameter.
-const PREMIUM_VISUAL_SCALE: Partial<Record<Theme, number>> = {
-  premiumJuice: 1.16,
-  premiumSundae: 1.13,
-  premiumWine: 1.16,
+const PREMIUM_IMAGE_SIZE: Partial<Record<Theme, [number, number]>> = {
+  premiumJuice: [2079, 756], premiumSundae: [1672, 941], premiumWine: [1672, 941],
+};
+
+// Fraction of each isolated sprite occupied by its solid body at the contact band.
+// Art is scaled around this band, so garnish never changes the theme-independent collider.
+const PREMIUM_BODY_RATIO: Partial<Record<Theme, number[]>> = {
+  premiumJuice: [0.62, 0.66, 0.66, 0.67, 0.64, 0.66, 0.65],
+  premiumSundae: [0.56, 0.58, 0.56, 0.59, 0.62, 0.64, 0.61],
+  premiumWine: [0.78, 0.72, 0.70, 0.72, 0.71, 0.70, 0.76],
 };
 
 type Settings = {
@@ -105,6 +116,12 @@ type Settings = {
   blastForce: number;
   sleepSpeed: number;
   sleepDelayMs: number;
+  contactSlop: number;
+  bounceCutoff: number;
+  wakeImpulse: number;
+  mergeSettleMs: number;
+  dangerPenetration: number;
+  returnSpeed: number;
 };
 
 const DEFAULTS: Settings = {
@@ -112,7 +129,7 @@ const DEFAULTS: Settings = {
   power: false,
   levels: false,
   dynamicDanger: false,
-  theme: 'simpleJuice',
+  theme: 'premiumJuice',
   aimLength: 2000,
   bounces: true,
   sound: false,
@@ -131,11 +148,17 @@ const DEFAULTS: Settings = {
   slope: 0.01,
   size: 1,
   throwThreshold: 65,
-  gameOverMs: 1000,
+  gameOverMs: 1400,
   blastRadius: 138,
   blastForce: 4.2,
   sleepSpeed: 0.08,
   sleepDelayMs: 420,
+  contactSlop: 0.45,
+  bounceCutoff: 0.55,
+  wakeImpulse: 0.45,
+  mergeSettleMs: 160,
+  dangerPenetration: 0.32,
+  returnSpeed: 0.8,
 };
 
 type Cup = {
@@ -152,6 +175,7 @@ type Cup = {
   mergeLockMs: number;
   sleeping: boolean;
   sleepMs: number;
+  contacts: number;
 };
 
 type Burst = { x: number; y: number; life: number; color: string; maxR: number };
@@ -247,6 +271,7 @@ const simpleKind = (theme: Theme) =>
   theme.includes('Sundae') ? 'sundae' : theme.includes('Wine') ? 'wine' : 'juice';
 const themeEmoji = (theme: Theme) =>
   theme.includes('Sundae') ? '🍨' : theme.includes('Wine') ? '🍷' : '🥤';
+const levelName = (theme: Theme, level: number) => THEME_LEVEL_NAMES[simpleKind(theme)][level];
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -352,7 +377,7 @@ export default function Home() {
 
   useEffect(() => {
     let loaded = DEFAULTS;
-    const raw = localStorage.getItem('juice-v42-settings');
+    const raw = localStorage.getItem('juice-v43-settings');
     if (raw) {
       try { loaded = { ...DEFAULTS, ...JSON.parse(raw) }; } catch { /* ignore */ }
     }
@@ -370,7 +395,7 @@ export default function Home() {
   useEffect(() => {
     settingsRef.current = settings;
     predictionRef.current.lastCalc = 0;
-    if (hydratedRef.current) localStorage.setItem('juice-v42-settings', JSON.stringify(settings));
+    if (hydratedRef.current) localStorage.setItem('juice-v43-settings', JSON.stringify(settings));
   }, [settings]);
 
   useEffect(() => {
@@ -497,11 +522,12 @@ export default function Home() {
     const low = Math.min(active.minPower, active.maxPower);
     const high = Math.max(active.minPower, active.maxPower);
     const speed = active.power ? clamp(requestedPower, low, high) : active.fixedSpeed;
+    const radius = radiusFor(level);
     cupsRef.current.push({
-      id: idRef.current++, x: aim.x, y: WORLD_H - 26,
+      id: idRef.current++, x: aim.x, y: WORLD_H - radius - 4,
       vx: Math.sin(aim.angle) * speed, vy: -Math.cos(aim.angle) * speed,
-      level, r: radiusFor(level), dangerMs: 0, ageMs: 0,
-      safeExited: false, mergeLockMs: 0, sleeping: false, sleepMs: 0,
+      level, r: radius, dangerMs: 0, ageMs: 0,
+      safeExited: false, mergeLockMs: 0, sleeping: false, sleepMs: 0, contacts: 0,
     });
     if (active.dynamicDanger) {
       dangerLineRef.current = clamp(dangerLineRef.current - 9, DYNAMIC_DANGER_MIN, FIXED_DANGER);
@@ -590,7 +616,7 @@ export default function Home() {
       const points: Array<{ x: number; y: number }> = [];
       const r = radiusFor(queueRef.current[0]);
       let x = aim.x;
-      let y = WORLD_H - 26;
+      let y = WORLD_H - r - 4;
       let vx = Math.sin(aim.angle) * speed;
       let vy = -Math.cos(aim.angle) * speed;
       let travel = 0;
@@ -647,13 +673,13 @@ export default function Home() {
       if (!image || !image.complete || !image.naturalWidth || !bounds) return false;
       const projected = project(cup.x, cup.y);
       const p = { ...projected, x: Math.round(projected.x * 2) / 2, y: Math.round(projected.y * 2) / 2 };
-      const cellWidth = image.naturalWidth / 7;
       const [bx0, by0, bx1, by1] = bounds;
       const sourceW = bx1 - bx0;
       const sourceH = by1 - by0;
-      const visualWidth = cup.r * 2 * p.scale * (PREMIUM_VISUAL_SCALE[theme] ?? 1);
+      const bodyRatio = PREMIUM_BODY_RATIO[theme]?.[cup.level] ?? 0.7;
+      const visualWidth = cup.r * 2 * p.scale / bodyRatio;
       const visualHeight = visualWidth * (sourceH / sourceW);
-      ctx.drawImage(image, cup.level * cellWidth + bx0, by0, sourceW, sourceH,
+      ctx.drawImage(image, bx0, by0, sourceW, sourceH,
         p.x - visualWidth / 2, p.y - visualHeight, visualWidth, visualHeight);
       if (settingsRef.current.levels) {
         ctx.save();
@@ -732,16 +758,28 @@ export default function Home() {
     };
     const drawCollisionFootprint = (cup: Cup, preview = false) => {
       if (!settingsRef.current.debugHitboxes) return;
-      const p = project(cup.x, cup.y);
-      const radius = cup.r * p.scale;
+      const center = project(cup.x, cup.y);
+      const lift = cup.r * center.scale * 0.9;
+      const ring = (liftY: number) => {
+        ctx.beginPath();
+        for (let index = 0; index <= 36; index += 1) {
+          const angle = index / 36 * Math.PI * 2;
+          const p = project(cup.x + Math.cos(angle) * cup.r, cup.y + Math.sin(angle) * cup.r);
+          if (index) ctx.lineTo(p.x, p.y - liftY); else ctx.moveTo(p.x, p.y - liftY);
+        }
+        ctx.closePath();
+      };
       ctx.save();
       ctx.fillStyle = preview ? '#48d7ff22' : '#ffde5926';
       ctx.strokeStyle = preview ? '#35d4ffdd' : '#ffcc3ddd';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      ctx.ellipse(p.x, p.y - radius * 0.08, radius, Math.max(3, radius * 0.34), 0, 0, Math.PI * 2);
-      ctx.fill(); ctx.stroke();
+      ring(0); ctx.fill(); ctx.stroke();
+      ring(lift); ctx.stroke();
+      for (const angle of [0, Math.PI]) {
+        const p = project(cup.x + Math.cos(angle) * cup.r, cup.y + Math.sin(angle) * cup.r);
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - lift); ctx.stroke();
+      }
       ctx.setLineDash([]); ctx.restore();
     };
     const drawLaneDebug = () => {
@@ -790,10 +828,13 @@ export default function Home() {
         const movingMax = cupsRef.current.reduce((maximum, cup) =>
           Math.max(maximum, Math.hypot(cup.vx, cup.vy)), 0);
         const maxVelocity = movingMax;
-        const substeps = clamp(Math.ceil(maxVelocity * dt / 11), 1, 3);
+        const substeps = clamp(Math.ceil(maxVelocity * dt / 6), 1, 5);
         const stepDt = dt / substeps;
         for (let substep = 0; substep < substeps; substep += 1) {
+          const remove = new Set<number>();
+          const add: Cup[] = [];
           for (const cup of cupsRef.current) {
+            cup.contacts = 0;
             cup.ageMs += stepDt * 16.67;
             cup.mergeLockMs = Math.max(0, cup.mergeLockMs - stepDt * 16.67);
             if (!cup.sleeping) {
@@ -808,29 +849,21 @@ export default function Home() {
               }
               if (cup.y - cup.r < 0) {
                 cup.y = cup.r; cup.vy = Math.abs(cup.vy) * active.frontRest; cup.vx *= 0.88;
+                cup.contacts += 1;
               }
-              if (cup.y + cup.r > WORLD_H) { cup.y = WORLD_H - cup.r; cup.vy = -Math.abs(cup.vy) * 0.08; }
-              const speed = Math.hypot(cup.vx, cup.vy);
-              if (speed < active.sleepSpeed) {
-                cup.sleepMs += stepDt * 16.67;
-                if (cup.sleepMs >= active.sleepDelayMs) {
-                  cup.sleeping = true; cup.vx = 0; cup.vy = 0;
-                }
-              } else cup.sleepMs = 0;
+              if (cup.y + cup.r > WORLD_H) {
+                if (cup.vy > active.returnSpeed && cup.ageMs > 300) remove.add(cup.id);
+                else { cup.y = WORLD_H - cup.r; cup.vy = -Math.abs(cup.vy) * 0.08; cup.contacts += 1; }
+              }
             }
-            if (cup.y + cup.r < dangerLineRef.current - 3) cup.safeExited = true;
-            const inDanger = cup.y + cup.r > dangerLineRef.current;
-            if ((cup.safeExited || cup.ageMs > 900) && inDanger) cup.dangerMs += stepDt * 16.67;
-            else cup.dangerMs = Math.max(0, cup.dangerMs - stepDt * 34);
           }
 
-          const remove = new Set<number>();
-          const add: Cup[] = [];
           const cups = cupsRef.current;
           for (let i = 0; i < cups.length; i += 1) for (let k = i + 1; k < cups.length; k += 1) {
             const a = cups[i], b = cups[k];
             if (remove.has(a.id) || remove.has(b.id)) continue;
             const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy) || 0.01, min = a.r + b.r;
+            if (dist < min + active.contactSlop) { a.contacts += 1; b.contacts += 1; }
             if (a.level === b.level && a.mergeLockMs <= 0 && b.mergeLockMs <= 0 && dist < min * MERGE_SENSOR) {
               remove.add(a.id); remove.add(b.id);
               const x = (a.x + b.x) / 2, y = (a.y + b.y) / 2;
@@ -855,7 +888,7 @@ export default function Home() {
                 add.push({ id: idRef.current++, x, y, vx: (a.vx * ma + b.vx * mb) / total,
                   vy: (a.vy * ma + b.vy * mb) / total, level: nextLevel, r: radiusFor(nextLevel),
                   dangerMs: 0, ageMs: Math.max(a.ageMs, b.ageMs), safeExited: a.safeExited || b.safeExited,
-                  mergeLockMs: 90, sleeping: false, sleepMs: 0 });
+                  mergeLockMs: active.mergeSettleMs, sleeping: false, sleepMs: 0, contacts: 0 });
                 burstsRef.current.push({ x, y, life: 1, color: LEVELS[nextLevel].color, maxR: 52 });
                 award((nextLevel + 1) * 120);
                 unlockedRef.current = Math.max(unlockedRef.current, nextLevel); setUnlocked(unlockedRef.current);
@@ -866,21 +899,46 @@ export default function Home() {
             if (dist >= min) continue;
             const nx = dx / dist, ny = dy / dist, overlap = min - dist;
             const ma = a.r * a.r, mb = b.r * b.r, total = ma + mb;
-            if (overlap > 0.02) {
+            const normalVelocity = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+            const impact = Math.max(0, -normalVelocity);
+            const meaningfulImpact = impact > active.wakeImpulse || overlap > active.contactSlop * 3;
+            if (meaningfulImpact) {
               a.sleeping = false; b.sleeping = false; a.sleepMs = 0; b.sleepMs = 0;
             }
-            a.x -= nx * overlap * (mb / total); a.y -= ny * overlap * (mb / total);
-            b.x += nx * overlap * (ma / total); b.y += ny * overlap * (ma / total);
-            const normalVelocity = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+            const correction = Math.max(0, overlap - active.contactSlop) * 0.68;
+            a.x -= nx * correction * (mb / total); a.y -= ny * correction * (mb / total);
+            b.x += nx * correction * (ma / total); b.y += ny * correction * (ma / total);
             if (normalVelocity < 0) {
-              const impulse = -(1 + active.cupRest) * normalVelocity / (1 / ma + 1 / mb);
+              const restitution = impact > active.bounceCutoff && a.mergeLockMs <= 0 && b.mergeLockMs <= 0
+                ? active.cupRest : 0;
+              const impulse = -(1 + restitution) * normalVelocity / (1 / ma + 1 / mb);
               a.vx -= impulse * nx / ma; a.vy -= impulse * ny / ma;
               b.vx += impulse * nx / mb; b.vy += impulse * ny / mb;
+              if (!meaningfulImpact) {
+                if (a.sleeping) { a.vx = 0; a.vy = 0; }
+                if (b.sleeping) { b.vx = 0; b.vy = 0; }
+              }
             }
           }
-          if (remove.size) {
+          if (remove.size || add.length) {
             cupsRef.current = cupsRef.current.filter((cup) => !remove.has(cup.id)).concat(add);
             predictionRef.current.lastCalc = 0;
+          }
+          for (const cup of cupsRef.current) {
+            const speed = Math.hypot(cup.vx, cup.vy);
+            if (!cup.sleeping) {
+              if (cup.contacts > 0 && speed < active.sleepSpeed) cup.sleepMs += stepDt * 16.67;
+              else cup.sleepMs = Math.max(0, cup.sleepMs - stepDt * 34);
+              if (cup.sleepMs >= active.sleepDelayMs) {
+                cup.sleeping = true; cup.vx = 0; cup.vy = 0;
+              }
+            }
+            if (cup.y + cup.r < dangerLineRef.current - 3) cup.safeExited = true;
+            const penetration = cup.y + cup.r - dangerLineRef.current;
+            const stable = cup.sleeping || (cup.contacts > 0 && speed < Math.max(0.14, active.sleepSpeed * 1.8));
+            const inDanger = penetration > Math.max(7, cup.r * active.dangerPenetration);
+            if ((cup.safeExited || cup.ageMs > 1200) && stable && inDanger) cup.dangerMs += stepDt * 16.67;
+            else cup.dangerMs = Math.max(0, cup.dangerMs - stepDt * 50);
           }
         }
       }
@@ -913,12 +971,14 @@ export default function Home() {
       burstsRef.current = burstsRef.current.filter((burst) => burst.life > 0);
 
       if (runningRef.current) {
-        const previewCup: Cup = { id: -1, x: aimRef.current.x, y: WORLD_H - 18, vx: 0, vy: 0,
-          level: queueRef.current[0], r: radiusFor(queueRef.current[0]), dangerMs: 0,
-          ageMs: 0, safeExited: false, mergeLockMs: 0, sleeping: false, sleepMs: 0 };
+        const previewRadius = radiusFor(queueRef.current[0]);
+        const previewY = WORLD_H - previewRadius - 4;
+        const previewCup: Cup = { id: -1, x: aimRef.current.x, y: previewY, vx: 0, vy: 0,
+          level: queueRef.current[0], r: previewRadius, dangerMs: 0,
+          ageMs: 0, safeExited: false, mergeLockMs: 0, sleeping: false, sleepMs: 0, contacts: 0 };
         drawCup(previewCup); drawCollisionFootprint(previewCup, true);
         if (active.angle) {
-          const base = project(aimRef.current.x, WORLD_H - 18), length = 68;
+          const base = project(aimRef.current.x, previewY), length = 68;
           const hx = base.x + Math.sin(aimRef.current.angle) * length, hy = base.y - Math.cos(aimRef.current.angle) * length;
           ctx.fillStyle = aimRef.current.locked ? '#46c887' : '#fff'; ctx.strokeStyle = '#6f442d'; ctx.lineWidth = 2;
           ctx.beginPath(); ctx.arc(hx, hy, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -952,7 +1012,8 @@ export default function Home() {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left, y = event.clientY - rect.top;
     const gesture = gestureRef.current, active = settingsRef.current, aim = aimRef.current, now = performance.now();
-    const projectedBase = projectLane(aim.x, WORLD_H - 18, rect.width, rect.height);
+    const launchY = WORLD_H - radiusFor(queueRef.current[0]) - 4;
+    const projectedBase = projectLane(aim.x, launchY, rect.width, rect.height);
     const baseX = projectedBase.x, baseY = projectedBase.y;
     const handleX = baseX + Math.sin(aim.angle) * 68, handleY = baseY - Math.cos(aim.angle) * 68;
     if (phase === 'down') {
@@ -967,7 +1028,7 @@ export default function Home() {
       }
       Object.assign(gesture, { active: true, mode, pointerId: event.pointerId, originX: x, originY: y,
         lastX: x, lastY: y, positionLocked: false, samples: [{ y, t: now }] });
-      if (mode === 'position' || mode === 'direct') aim.x = screenToWorldX(x, WORLD_H - 18, rect.width, rect.height);
+      if (mode === 'position' || mode === 'direct') aim.x = screenToWorldX(x, launchY, rect.width, rect.height);
       if (mode === 'aim') { aim.locked = false; setAimLocked(false); }
       event.currentTarget.setPointerCapture(event.pointerId); predictionRef.current.lastCalc = 0; return;
     }
@@ -976,16 +1037,16 @@ export default function Home() {
       gesture.lastX = x; gesture.lastY = y; gesture.samples.push({ y, t: now });
       gesture.samples = gesture.samples.filter((sample) => now - sample.t < 160);
       const upward = gesture.originY - y;
-      if (gesture.mode === 'position') aim.x = screenToWorldX(x, WORLD_H - 18, rect.width, rect.height);
+      if (gesture.mode === 'position') aim.x = screenToWorldX(x, launchY, rect.width, rect.height);
       else if (gesture.mode === 'aim') {
-        const updatedBaseX = projectLane(aim.x, WORLD_H - 18, rect.width, rect.height).x;
+        const updatedBaseX = projectLane(aim.x, launchY, rect.width, rect.height).x;
         const max = active.maxAngle * Math.PI / 180;
         aim.angle = clamp(Math.atan2(x - updatedBaseX, Math.max(5, baseY - y)), -max, max);
       } else if (gesture.mode === 'direct') {
         aim.angle = 0;
-        if (!active.straightStabilizer) aim.x = screenToWorldX(x, WORLD_H - 18, rect.width, rect.height);
+        if (!active.straightStabilizer) aim.x = screenToWorldX(x, launchY, rect.width, rect.height);
         else if (!gesture.positionLocked) {
-          aim.x = screenToWorldX(x, WORLD_H - 18, rect.width, rect.height);
+          aim.x = screenToWorldX(x, launchY, rect.width, rect.height);
           if (upward >= active.straightLockDistance) gesture.positionLocked = true;
         }
         setPowerPreview(clamp(upward / active.throwThreshold, 0, 1));
@@ -1050,11 +1111,15 @@ export default function Home() {
   };
   const preset = (kind: 'stable' | 'balanced' | 'extreme') => {
     if (kind === 'stable') patchSettings({ wallRest: 0.72, cupRest: 0.1, drag: 0.982, slope: 0.012,
-      fixedSpeed: 8, minPower: 7, maxPower: 14, sleepSpeed: 0.1, sleepDelayMs: 320 });
+      fixedSpeed: 8, minPower: 7, maxPower: 14, sleepSpeed: 0.1, sleepDelayMs: 320,
+      contactSlop: 0.55, bounceCutoff: 0.75, wakeImpulse: 0.6, mergeSettleMs: 190, gameOverMs: 1500 });
     else if (kind === 'balanced') patchSettings({ wallRest: 0.91, frontRest: 0.12, cupRest: 0.22, drag: 0.994, slope: 0.01,
-      size: 1, fixedSpeed: 9, minPower: 10, maxPower: 16, sleepSpeed: 0.08, sleepDelayMs: 420 });
+      size: 1, fixedSpeed: 9, minPower: 10, maxPower: 16, sleepSpeed: 0.08, sleepDelayMs: 420,
+      contactSlop: 0.45, bounceCutoff: 0.55, wakeImpulse: 0.45, mergeSettleMs: 160,
+      dangerPenetration: 0.32, returnSpeed: 0.8, gameOverMs: 1400 });
     else patchSettings({ wallRest: 0.98, cupRest: 0.3, drag: 0.994, slope: 0.006,
-      fixedSpeed: 10.5, minPower: 10, maxPower: 24, sleepSpeed: 0.045, sleepDelayMs: 650 });
+      fixedSpeed: 10.5, minPower: 10, maxPower: 24, sleepSpeed: 0.045, sleepDelayMs: 650,
+      contactSlop: 0.3, bounceCutoff: 0.2, wakeImpulse: 0.25, mergeSettleMs: 90 });
   };
 
   return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲">
@@ -1075,12 +1140,12 @@ export default function Home() {
       {settings.angle && <button className={`aim-state ${aimLocked ? 'locked' : ''}`} onClick={toggleAimLock}>{aimLocked ? '角度已鎖定・點此解鎖' : '拖曳杯子或瞄準線・點此鎖定'}</button>}
       {powerPreview > 0 && <div className="power-meter"><i style={{ height: `${Math.max(8, powerPreview * 100)}%` }}/><span>{settings.power ? '力度' : '有效'}</span></div>}
       {paused && !settingsOpen && !gameOver && <div className="pause-panel"><small>遊戲已暫停</small><h2>杯子與危險線已凍結</h2><div><button onClick={resumeGame}>繼續遊戲</button><button className="secondary" onClick={openSettings}>開啟設定</button></div></div>}
-      {gameOver && <div className="game-over"><small>杯子越過危險線</small><h2>{score.toLocaleString()}</h2><p>本局訂單 {orders}・復活 {revives} 次</p><div>
+      {gameOver && <div className="game-over"><small>穩定堆積越過危險線</small><h2>{score.toLocaleString()}</h2><p>本局訂單 {orders}・復活 {revives} 次</p><div>
         {historyCount > 0 && <button className="undo-action" onClick={undo}>復原</button>}<button onClick={revive}>復活</button><button className="secondary" onClick={() => reset()}>重來</button>
       </div></div>}
     </div>
     <section className="merge-strip"><div className="strip-label"><b>融合</b><small>{unlocked + 1}/7</small></div>
-      {LEVELS.map((level, index) => <div className={`mini-level ${index <= unlocked ? '' : 'future'}`} key={level.name} title={level.name}><CupIcon level={index} theme={settings.theme}/>{index < 6 && <i>›</i>}</div>)}
+      {LEVELS.map((level, index) => <div className={`mini-level ${index <= unlocked ? '' : 'future'}`} key={level.name} title={levelName(settings.theme, index)}><CupIcon level={index} theme={settings.theme}/>{index < 6 && <i>›</i>}</div>)}
       <div className="blast-mark" title="最高級爆炸">💥</div>
     </section>
     {settingsOpen && <SettingsSheet settings={settings} close={closeSettings} patch={patchSettings} preset={preset} pause={pauseGame} restart={restartGame}/>}
@@ -1089,7 +1154,18 @@ export default function Home() {
 
 function CupIcon({ level, theme }: { level: number; theme: Theme }) {
   const asset = PREMIUM_ASSETS[theme];
-  if (asset) return <span className="sprite-icon" style={{ backgroundImage: `url(${asset})`, backgroundSize: '700% 100%', backgroundPosition: `${level / 6 * 100}% center` }}/>;
+  const bounds = SPRITE_BOUNDS[theme]?.[level];
+  const imageSize = PREMIUM_IMAGE_SIZE[theme];
+  if (asset && bounds && imageSize) {
+    const [x0, y0, x1, y1] = bounds;
+    const [imageWidth, imageHeight] = imageSize;
+    const sourceWidth = x1 - x0, sourceHeight = y1 - y0;
+    const positionX = imageWidth === sourceWidth ? 0 : x0 / (imageWidth - sourceWidth) * 100;
+    const positionY = imageHeight === sourceHeight ? 0 : y0 / (imageHeight - sourceHeight) * 100;
+    return <span className="sprite-icon" style={{ backgroundImage: `url(${asset})`,
+      backgroundSize: `${imageWidth / sourceWidth * 100}% ${imageHeight / sourceHeight * 100}%`,
+      backgroundPosition: `${positionX}% ${positionY}%` }}/>;
+  }
   const info = LEVELS[level];
   return <span className="simple-icon" style={{ '--juice': info.color, '--dark': info.dark } as React.CSSProperties}>{themeEmoji(theme)}</span>;
 }
@@ -1137,7 +1213,26 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(v) => patch({ throwThreshold: v })}/>
       </div>
       <details className="developer"><summary>開發者專區 <span>調整遊戲手感</span></summary><div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復新版預設</button></div>
-        <Toggle title="顯示碰撞邊界" note="顯示杯子橢圓、左右護欄與終點牆" value={settings.debugHitboxes} onChange={(v) => patch({ debugHitboxes: v })}/><Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(v) => patch({ maxAngle: v })}/><Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(v) => patch({ fixedSpeed: v })}/><Slider title="左右牆反彈" value={settings.wallRest} min={0.1} max={0.98} step={0.01} onChange={(v) => patch({ wallRest: v })}/><Slider title="前方牆反彈" value={settings.frontRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ frontRest: v })}/><Slider title="杯子互撞反彈" value={settings.cupRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ cupRest: v })}/><Slider title="速度衰減" value={settings.drag} min={0.96} max={0.995} step={0.001} onChange={(v) => patch({ drag: v })}/><Slider title="斜坡重力" value={settings.slope} min={0} max={0.03} step={0.001} onChange={(v) => patch({ slope: v })}/><Slider title="休眠速度" value={settings.sleepSpeed} min={0.02} max={0.2} step={0.005} onChange={(v) => patch({ sleepSpeed: v })}/><Slider title="休眠等待" value={settings.sleepDelayMs} min={100} max={1200} step={20} unit="ms" onChange={(v) => patch({ sleepDelayMs: v })}/><Slider title="杯子尺寸（下一局）" value={settings.size} min={0.6} max={1.6} step={0.01} onChange={(v) => patch({ size: v })}/><Slider title="結束等待" value={settings.gameOverMs} min={300} max={2500} step={100} unit="ms" onChange={(v) => patch({ gameOverMs: v })}/><Slider title="爆炸範圍" value={settings.blastRadius} min={80} max={210} step={5} onChange={(v) => patch({ blastRadius: v })}/><Slider title="爆炸推力" value={settings.blastForce} min={1} max={8} step={0.2} onChange={(v) => patch({ blastForce: v })}/>
+        <Toggle title="顯示 2.5D 碰撞框" note="顯示真實投影圓柱、左右護欄與終點牆" value={settings.debugHitboxes} onChange={(v) => patch({ debugHitboxes: v })}/>
+        <Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(v) => patch({ maxAngle: v })}/>
+        <Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(v) => patch({ fixedSpeed: v })}/>
+        <Slider title="左右牆反彈" value={settings.wallRest} min={0.1} max={0.98} step={0.01} onChange={(v) => patch({ wallRest: v })}/>
+        <Slider title="前方牆反彈" value={settings.frontRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ frontRest: v })}/>
+        <Slider title="杯子互撞反彈" value={settings.cupRest} min={0} max={0.5} step={0.01} onChange={(v) => patch({ cupRest: v })}/>
+        <Slider title="低速取消反彈" value={settings.bounceCutoff} min={0} max={2} step={0.05} onChange={(v) => patch({ bounceCutoff: v })}/>
+        <Slider title="碰撞容許誤差" value={settings.contactSlop} min={0} max={1.5} step={0.05} onChange={(v) => patch({ contactSlop: v })}/>
+        <Slider title="喚醒碰撞力度" value={settings.wakeImpulse} min={0.1} max={2} step={0.05} onChange={(v) => patch({ wakeImpulse: v })}/>
+        <Slider title="融合安定時間" value={settings.mergeSettleMs} min={0} max={400} step={10} unit="ms" onChange={(v) => patch({ mergeSettleMs: v })}/>
+        <Slider title="速度衰減" value={settings.drag} min={0.96} max={0.995} step={0.001} onChange={(v) => patch({ drag: v })}/>
+        <Slider title="斜坡重力" value={settings.slope} min={0} max={0.03} step={0.001} onChange={(v) => patch({ slope: v })}/>
+        <Slider title="休眠速度" value={settings.sleepSpeed} min={0.02} max={0.2} step={0.005} onChange={(v) => patch({ sleepSpeed: v })}/>
+        <Slider title="休眠等待" value={settings.sleepDelayMs} min={100} max={1200} step={20} unit="ms" onChange={(v) => patch({ sleepDelayMs: v })}/>
+        <Slider title="危險線深入比例" value={settings.dangerPenetration} min={0.1} max={0.8} step={0.02} onChange={(v) => patch({ dangerPenetration: v })}/>
+        <Slider title="高速回收門檻" value={settings.returnSpeed} min={0.2} max={4} step={0.1} onChange={(v) => patch({ returnSpeed: v })}/>
+        <Slider title="杯子尺寸（下一局）" value={settings.size} min={0.6} max={1.6} step={0.01} onChange={(v) => patch({ size: v })}/>
+        <Slider title="穩定堆積結束等待" value={settings.gameOverMs} min={500} max={3000} step={100} unit="ms" onChange={(v) => patch({ gameOverMs: v })}/>
+        <Slider title="爆炸範圍" value={settings.blastRadius} min={80} max={210} step={5} onChange={(v) => patch({ blastRadius: v })}/>
+        <Slider title="爆炸推力" value={settings.blastForce} min={1} max={8} step={0.2} onChange={(v) => patch({ blastForce: v })}/>
       </details>
     </div><div className="settings-actions"><button className="pause-action" onClick={pause}>暫停遊戲</button><button className={`restart-action ${confirmRestart ? 'confirm' : ''}`} onClick={() => { if (confirmRestart) restart(); else setConfirmRestart(true); }}>{confirmRestart ? '再次點擊確認重來' : '重新開始'}</button></div><button className="done-button" onClick={close}>完成並繼續</button>
   </section></div>;
