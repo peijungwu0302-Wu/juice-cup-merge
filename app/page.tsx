@@ -54,45 +54,37 @@ type Theme =
   | 'simpleWine';
 
 const PREMIUM_ASSETS: Partial<Record<Theme, string>> = {
-  premiumJuice: '/assets/cups-juice-premium-v2.png',
-  premiumSundae: '/assets/cups-sundae-premium-v2.png',
-  premiumWine: '/assets/cups-wine-premium-v2.png',
+  premiumJuice: '/assets/cups-juice-premium-v3.png',
+  premiumSundae: '/assets/cups-sundae-premium-v3.png',
+  premiumWine: '/assets/cups-wine-premium-v3.png',
 };
 
 type Bounds = [number, number, number, number];
 const SPRITE_BOUNDS: Partial<Record<Theme, Bounds[]>> = {
   premiumJuice: [
-    [18, 340, 250, 706], [312, 217, 545, 711], [577, 257, 794, 711],
-    [842, 160, 1129, 714], [1129, 101, 1426, 714], [1426, 81, 1735, 715], [1753, 13, 2067, 715],
+    [41, 319, 267, 650], [317, 258, 584, 651], [608, 325, 855, 651],
+    [883, 311, 1145, 651], [1171, 296, 1419, 652], [1459, 268, 1774, 652], [1795, 262, 2088, 657],
   ],
   premiumSundae: [
-    [21, 520, 195, 899], [214, 468, 430, 901], [430, 417, 669, 902],
-    [669, 329, 907, 902], [907, 273, 1146, 903], [1146, 187, 1389, 903], [1389, 11, 1667, 906],
+    [21, 335, 237, 706], [262, 337, 486, 707], [505, 329, 739, 706],
+    [756, 309, 1001, 707], [1015, 315, 1263, 710], [1270, 312, 1510, 709], [1510, 258, 1767, 710],
   ],
   premiumWine: [
-    [17, 436, 184, 802], [208, 287, 386, 803], [408, 289, 612, 806],
-    [624, 188, 831, 807], [856, 111, 1084, 807], [1084, 80, 1325, 807], [1334, 118, 1666, 808],
+    [20, 372, 200, 713], [242, 263, 422, 713], [467, 294, 681, 714],
+    [725, 272, 933, 714], [974, 252, 1176, 714], [1206, 242, 1413, 714], [1443, 241, 1757, 715],
   ],
 };
 
 const PREMIUM_IMAGE_SIZE: Partial<Record<Theme, [number, number]>> = {
-  premiumJuice: [2079, 756], premiumSundae: [1672, 941], premiumWine: [1672, 941],
+  premiumJuice: [2118, 742], premiumSundae: [1794, 877], premiumWine: [1774, 887],
 };
 
 // Fraction of each isolated sprite occupied by its solid body at the contact band.
 // Art is scaled around this band, so garnish never changes the theme-independent collider.
 const PREMIUM_BODY_RATIO: Partial<Record<Theme, number[]>> = {
-  premiumJuice: [0.62, 0.66, 0.66, 0.67, 0.64, 0.66, 0.65],
-  premiumSundae: [0.56, 0.58, 0.56, 0.59, 0.62, 0.64, 0.61],
-  premiumWine: [0.78, 0.72, 0.70, 0.72, 0.71, 0.70, 0.76],
-};
-
-// Maximum art height in collider diameters. This changes only the 2.5D art layer:
-// gameplay size and contact points stay identical when a theme is changed mid-round.
-const PREMIUM_HEIGHT_CAP: Partial<Record<Theme, number[]>> = {
-  premiumJuice: [3.2, 3.2, 3.2, 3.15, 3.1, 3.05, 3],
-  premiumSundae: [3.2, 3.15, 3.05, 2.95, 2.85, 2.75, 2.7],
-  premiumWine: [3.1, 3.1, 3.05, 3, 2.95, 2.9, 2.85],
+  premiumJuice: [0.84, 0.78, 0.80, 0.86, 0.86, 0.78, 0.84],
+  premiumSundae: [0.84, 0.84, 0.84, 0.86, 0.86, 0.84, 0.86],
+  premiumWine: [0.88, 0.88, 0.88, 0.90, 0.90, 0.90, 0.94],
 };
 
 type Settings = {
@@ -479,6 +471,52 @@ export default function Home() {
   const radiusFor = useCallback((level: number) =>
     28.5 * (roundLevelSizesRef.current[level] ?? DEFAULT_LEVEL_SIZES[level]) * roundSizeRef.current, []);
 
+  const applyLiveSizing = useCallback((size: number, levelSizes: number[]) => {
+    const nextSizes = levelSizes.map((value, index) => clamp(Number(value) || DEFAULT_LEVEL_SIZES[index], 0.6, 3));
+    const resizedRadius = (level: number) => 28.5 * (nextSizes[level] ?? DEFAULT_LEVEL_SIZES[level]) * size;
+    roundSizeRef.current = size;
+    roundLevelSizesRef.current = [...nextSizes];
+    cupsRef.current.forEach((cup) => { cup.r = resizedRadius(cup.level); });
+    historyRef.current = historyRef.current.map((snapshot) => ({
+      ...snapshot,
+      cups: snapshot.cups.map((cup) => ({ ...cup, r: resizedRadius(cup.level) })),
+    }));
+
+    // Settings pause the game. Resolve enlargement overlaps without triggering
+    // merges so the player can inspect the new pile before continuing.
+    for (let pass = 0; pass < 12; pass += 1) {
+      for (let i = 0; i < cupsRef.current.length; i += 1) for (let k = i + 1; k < cupsRef.current.length; k += 1) {
+        const a = cupsRef.current[i], b = cupsRef.current[k];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let distance = Math.hypot(dx, dy);
+        if (distance < 0.001) {
+          const angle = ((a.id * 97 + b.id * 193) % 360) * Math.PI / 180;
+          dx = Math.cos(angle); dy = Math.sin(angle); distance = 1;
+        }
+        const overlap = a.r + b.r - distance;
+        if (overlap <= 0) continue;
+        const nx = dx / distance, ny = dy / distance;
+        const ma = a.r * a.r, mb = b.r * b.r, total = ma + mb;
+        const correction = overlap * 0.56 + 0.02;
+        a.x -= nx * correction * (mb / total); a.y -= ny * correction * (mb / total);
+        b.x += nx * correction * (ma / total); b.y += ny * correction * (ma / total);
+      }
+      cupsRef.current.forEach((cup) => {
+        cup.x = clamp(cup.x, -WORLD_W / 2 + cup.r, WORLD_W / 2 - cup.r);
+        cup.y = clamp(cup.y, cup.r, WORLD_H - cup.r);
+      });
+    }
+    cupsRef.current.forEach((cup) => {
+      cup.dangerMs = 0;
+      cup.mergeLockMs = Math.max(cup.mergeLockMs, 450);
+      cup.sleeping = false;
+      cup.sleepMs = 0;
+      cup.contacts = 0;
+    });
+    safeUntilRef.current = Math.max(safeUntilRef.current, performance.now() + 650);
+    predictionRef.current.lastCalc = 0;
+  }, []);
+
   const award = useCallback((points: number) => {
     const next = scoreRef.current + points;
     scoreRef.current = next;
@@ -726,10 +764,9 @@ export default function Home() {
       const sourceH = by1 - by0;
       const bodyRatio = PREMIUM_BODY_RATIO[theme]?.[cup.level] ?? 0.7;
       const visualWidth = cup.r * 2 * p.scale / bodyRatio;
-      const naturalHeight = visualWidth * (sourceH / sourceW);
-      const colliderDiameter = cup.r * 2 * p.scale;
-      const heightCap = PREMIUM_HEIGHT_CAP[theme]?.[cup.level] ?? 3.1;
-      const visualHeight = Math.min(naturalHeight, colliderDiameter * heightCap);
+      // V3 sprites use naturally compact glass shapes. Keep their original aspect
+      // ratio instead of vertically squeezing fruit, stems or decorations.
+      const visualHeight = visualWidth * (sourceH / sourceW);
       return { image, bounds, p, sourceW, sourceH, visualWidth, visualHeight };
     };
     const drawPremiumCup = (cup: Cup, theme: Theme) => {
@@ -910,8 +947,9 @@ export default function Home() {
       if (runningRef.current && !pausedRef.current) {
         const movingMax = cupsRef.current.reduce((maximum, cup) =>
           Math.max(maximum, Math.hypot(cup.vx, cup.vy)), 0);
-        const maxVelocity = movingMax;
-        const substeps = clamp(Math.ceil(maxVelocity * dt / 6), 1, 5);
+        const smallestRadius = cupsRef.current.reduce((minimum, cup) => Math.min(minimum, cup.r), 28.5);
+        const travelLimit = Math.max(2.5, smallestRadius * 0.2);
+        const substeps = clamp(Math.ceil(movingMax * dt / travelLimit), 1, 8);
         const stepDt = dt / substeps;
         for (let substep = 0; substep < substeps; substep += 1) {
           const remove = new Set<number>();
@@ -939,6 +977,7 @@ export default function Home() {
                 else { cup.y = WORLD_H - cup.r; cup.vy = -Math.abs(cup.vy) * 0.08; cup.contacts += 1; }
               }
             }
+
           }
 
           const cups = cupsRef.current;
@@ -1003,6 +1042,25 @@ export default function Home() {
               }
             }
           }
+          // A second position-only pass removes the small residual overlaps
+          // left by a dense pile without inventing invisible barriers in valid gaps.
+          for (let i = 0; i < cups.length; i += 1) for (let k = i + 1; k < cups.length; k += 1) {
+            const a = cups[i], b = cups[k];
+            if (remove.has(a.id) || remove.has(b.id)) continue;
+            const dx = b.x - a.x, dy = b.y - a.y, distance = Math.hypot(dx, dy) || 0.01;
+            const overlap = a.r + b.r - distance - active.contactSlop;
+            if (overlap <= 0) continue;
+            const nx = dx / distance, ny = dy / distance;
+            const ma = a.r * a.r, mb = b.r * b.r, total = ma + mb;
+            const correction = overlap * 0.52;
+            a.x -= nx * correction * (mb / total); a.y -= ny * correction * (mb / total);
+            b.x += nx * correction * (ma / total); b.y += ny * correction * (ma / total);
+          }
+          cups.forEach((cup) => {
+            if (remove.has(cup.id)) return;
+            cup.x = clamp(cup.x, -WORLD_W / 2 + cup.r, WORLD_W / 2 - cup.r);
+            cup.y = clamp(cup.y, cup.r, WORLD_H - cup.r);
+          });
           if (remove.size || add.length) {
             cupsRef.current = cupsRef.current.filter((cup) => !remove.has(cup.id)).concat(add);
             predictionRef.current.lastCalc = 0;
@@ -1191,7 +1249,12 @@ export default function Home() {
       cupsRef.current.forEach((cup) => { cup.dangerMs = 0; });
     }
     if (patch.angle !== undefined) resetAim(lastLaunchXRef.current);
-    setSettings((current) => ({ ...current, ...patch }));
+    const next = { ...settingsRef.current, ...patch };
+    if (patch.size !== undefined || patch.levelSizes !== undefined) {
+      applyLiveSizing(next.size, next.levelSizes);
+    }
+    settingsRef.current = next;
+    setSettings(next);
   };
   const preset = (kind: 'stable' | 'balanced' | 'extreme') => {
     if (kind === 'stable') patchSettings({ wallRest: 0.72, cupRest: 0.1, drag: 0.982, slope: 0.012,
@@ -1314,8 +1377,8 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="休眠等待" value={settings.sleepDelayMs} min={100} max={1200} step={20} unit="ms" onChange={(v) => patch({ sleepDelayMs: v })}/>
         <Slider title="危險線深入比例" value={settings.dangerPenetration} min={0.1} max={0.8} step={0.02} onChange={(v) => patch({ dangerPenetration: v })}/>
         <Slider title="高速回收門檻" value={settings.returnSpeed} min={0.2} max={4} step={0.1} onChange={(v) => patch({ returnSpeed: v })}/>
-        <Slider title="杯子尺寸（下一局）" value={settings.size} min={0.6} max={1.6} step={0.01} onChange={(v) => patch({ size: v })}/>
-        <details className="level-sizes"><summary>各級杯子物理比例 <span>下一局套用</span></summary><div>
+        <Slider title="整體杯子尺寸（即時）" value={settings.size} min={0.6} max={1.6} step={0.01} onChange={(v) => patch({ size: v })}/>
+        <details className="level-sizes"><summary>各級杯子物理比例 <span>即時重排</span></summary><div>
           {settings.levelSizes.map((value, index) => <Slider key={index} title={`等級 ${index + 1} 比例`} value={value}
             min={0.6} max={3} step={0.01} onChange={(nextValue) => {
               const next = [...settings.levelSizes];
