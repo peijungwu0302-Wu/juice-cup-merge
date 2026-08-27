@@ -87,6 +87,14 @@ const PREMIUM_BODY_RATIO: Partial<Record<Theme, number[]>> = {
   premiumWine: [0.78, 0.72, 0.70, 0.72, 0.71, 0.70, 0.76],
 };
 
+// Maximum art height in collider diameters. This changes only the 2.5D art layer:
+// gameplay size and contact points stay identical when a theme is changed mid-round.
+const PREMIUM_HEIGHT_CAP: Partial<Record<Theme, number[]>> = {
+  premiumJuice: [3.2, 3.2, 3.2, 3.15, 3.1, 3.05, 3],
+  premiumSundae: [3.2, 3.15, 3.05, 2.95, 2.85, 2.75, 2.7],
+  premiumWine: [3.1, 3.1, 3.05, 3, 2.95, 2.9, 2.85],
+};
+
 type Settings = {
   angle: boolean;
   power: boolean;
@@ -204,6 +212,7 @@ type GameSnapshot = {
   dangerLine: number;
   launchX: number;
   revives: number;
+  luckyCooldown: number;
 };
 
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
@@ -296,6 +305,7 @@ export default function Home() {
   const sizeRef = useRef({ w: 390, h: 700, dpr: 1 });
   const queueRef = useRef<number[]>([0, 0]);
   const bagRef = useRef<number[]>([]);
+  const luckyCooldownRef = useRef(0);
   const historyRef = useRef<GameSnapshot[]>([]);
   const predictionRef = useRef<Pred>({ paths: [], lastCalc: 0 });
   const scoreRef = useRef(0);
@@ -332,7 +342,30 @@ export default function Home() {
       }
       bagRef.current = bag;
     }
-    return bagRef.current.shift() ?? 0;
+    const baseLevel = bagRef.current.shift() ?? 0;
+    if (luckyCooldownRef.current > 0) {
+      luckyCooldownRef.current -= 1;
+      return baseLevel;
+    }
+
+    // A single controlled roll may upgrade this draw. Higher levels are checked
+    // first, but can only appear after the player has already fused that level.
+    const candidates = [
+      { level: 4, chance: 0.0015, eligible: unlockedRef.current >= 4 && shotsRef.current >= 55 && ordersRef.current >= 2 },
+      { level: 3, chance: 0.007, eligible: unlockedRef.current >= 3 && shotsRef.current >= 28 && ordersRef.current >= 1 },
+      { level: 2, chance: 0.03, eligible: unlockedRef.current >= 2 && shotsRef.current >= 12 },
+    ];
+    const roll = Math.random();
+    let threshold = 0;
+    for (const candidate of candidates) {
+      if (!candidate.eligible) continue;
+      threshold += candidate.chance;
+      if (roll < threshold) {
+        luckyCooldownRef.current = 10;
+        return candidate.level;
+      }
+    }
+    return baseLevel;
   }, []);
 
   const resetAim = useCallback((x = lastLaunchXRef.current) => {
@@ -353,16 +386,17 @@ export default function Home() {
     safeUntilRef.current = 0;
     revivesRef.current = 0;
     bagRef.current = [];
+    luckyCooldownRef.current = 0;
     lastLaunchXRef.current = 0;
     maxOrdersThisRunRef.current = 0;
     dangerLineRef.current = active.dynamicDanger ? DYNAMIC_DANGER_START : FIXED_DANGER;
     resetAim(0);
-    const next = [drawBag(), drawBag()];
-    queueRef.current = next;
     scoreRef.current = 0;
     shotsRef.current = 0;
     ordersRef.current = 0;
     unlockedRef.current = 0;
+    const next = [drawBag(), drawBag()];
+    queueRef.current = next;
     setQueue(next);
     setScore(0);
     setShots(0);
@@ -476,6 +510,7 @@ export default function Home() {
       dangerLine: dangerLineRef.current,
       launchX: aimRef.current.x,
       revives: revivesRef.current,
+      luckyCooldown: luckyCooldownRef.current,
     };
     historyRef.current = [...historyRef.current, snapshot].slice(-HISTORY_LIMIT);
     setHistoryCount(historyRef.current.length);
@@ -494,6 +529,7 @@ export default function Home() {
     dangerLineRef.current = snapshot.dangerLine;
     lastLaunchXRef.current = snapshot.launchX;
     revivesRef.current = snapshot.revives;
+    luckyCooldownRef.current = snapshot.luckyCooldown;
     setScore(snapshot.score);
     setShots(snapshot.shots);
     setOrders(snapshot.orders);
@@ -667,10 +703,10 @@ export default function Home() {
         : [simulate(active.fixedSpeed)];
     };
 
-    const drawPremiumCup = (cup: Cup, theme: Theme) => {
+    const premiumVisualMetrics = (cup: Cup, theme: Theme) => {
       const image = art[theme];
       const bounds = SPRITE_BOUNDS[theme]?.[cup.level];
-      if (!image || !image.complete || !image.naturalWidth || !bounds) return false;
+      if (!image || !image.complete || !image.naturalWidth || !bounds) return null;
       const projected = project(cup.x, cup.y);
       const p = { ...projected, x: Math.round(projected.x * 2) / 2, y: Math.round(projected.y * 2) / 2 };
       const [bx0, by0, bx1, by1] = bounds;
@@ -678,7 +714,17 @@ export default function Home() {
       const sourceH = by1 - by0;
       const bodyRatio = PREMIUM_BODY_RATIO[theme]?.[cup.level] ?? 0.7;
       const visualWidth = cup.r * 2 * p.scale / bodyRatio;
-      const visualHeight = visualWidth * (sourceH / sourceW);
+      const naturalHeight = visualWidth * (sourceH / sourceW);
+      const colliderDiameter = cup.r * 2 * p.scale;
+      const heightCap = PREMIUM_HEIGHT_CAP[theme]?.[cup.level] ?? 3.1;
+      const visualHeight = Math.min(naturalHeight, colliderDiameter * heightCap);
+      return { image, bounds, p, sourceW, sourceH, visualWidth, visualHeight };
+    };
+    const drawPremiumCup = (cup: Cup, theme: Theme) => {
+      const metrics = premiumVisualMetrics(cup, theme);
+      if (!metrics) return false;
+      const { image, bounds, p, sourceW, sourceH, visualWidth, visualHeight } = metrics;
+      const [bx0, by0] = bounds;
       ctx.drawImage(image, bx0, by0, sourceW, sourceH,
         p.x - visualWidth / 2, p.y - visualHeight, visualWidth, visualHeight);
       if (settingsRef.current.levels) {
@@ -694,6 +740,31 @@ export default function Home() {
         ctx.restore();
       }
       return true;
+    };
+    const drawOcclusionCues = (cups: Cup[]) => {
+      const theme = settingsRef.current.theme;
+      if (!isPremium(theme) || cups.length < 2) return;
+      const metrics = cups.map((cup) => premiumVisualMetrics(cup, theme));
+      cups.forEach((cup, index) => {
+        const rear = metrics[index];
+        if (!rear) return;
+        const hiddenByFrontCup = metrics.slice(index + 1).some((front) => front &&
+          front.p.y > rear.p.y + 4 &&
+          Math.abs(front.p.x - rear.p.x) < (front.visualWidth + rear.visualWidth) * 0.23 &&
+          front.p.y - front.visualHeight < rear.p.y - rear.visualWidth * 0.2);
+        if (!hiddenByFrontCup) return;
+        const cueY = rear.p.y - Math.min(rear.visualHeight * 0.58, rear.visualWidth * 1.15);
+        ctx.save();
+        ctx.globalAlpha = 0.72;
+        ctx.strokeStyle = LEVELS[cup.level].color;
+        ctx.shadowColor = '#fff8d8';
+        ctx.shadowBlur = 5;
+        ctx.lineWidth = Math.max(1.3, rear.visualWidth * 0.035);
+        ctx.beginPath();
+        ctx.ellipse(rear.p.x, cueY, rear.visualWidth * 0.28, rear.visualWidth * 0.075, 0, Math.PI * 1.08, Math.PI * 1.92);
+        ctx.stroke();
+        ctx.restore();
+      });
     };
 
     const garnish = (level: number, x: number, y: number, w: number) => {
@@ -961,6 +1032,7 @@ export default function Home() {
       }
       const sortedCups = [...cupsRef.current].sort((a, b) => a.y - b.y);
       sortedCups.forEach(drawCup);
+      drawOcclusionCues(sortedCups);
       sortedCups.forEach((cup) => drawCollisionFootprint(cup));
       for (const burst of burstsRef.current) {
         if (!pausedRef.current) burst.life -= 0.035 * dt;
@@ -1171,7 +1243,7 @@ function CupIcon({ level, theme }: { level: number; theme: Theme }) {
 }
 
 function CupPreview({ label, level, theme }: { label: string; level: number; theme: Theme }) {
-  return <div className="cup-preview"><small>{label}</small><CupIcon level={level} theme={theme}/></div>;
+  return <div className={`cup-preview${level >= 2 ? ' lucky' : ''}`}><small>{label}</small><CupIcon level={level} theme={theme}/></div>;
 }
 
 function Toggle({ title, note, value, onChange }: { title: string; note: string; value: boolean; onChange: (value: boolean) => void }) {

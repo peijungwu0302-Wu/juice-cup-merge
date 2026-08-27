@@ -175,6 +175,16 @@ button { -webkit-tap-highlight-color: transparent; }
   filter: drop-shadow(0 2px 2px #4b271c40);
 }
 
+.cup-preview.lucky .sprite-icon,
+.cup-preview.lucky .simple-icon {
+  filter: drop-shadow(0 0 3px #ffd454cc) drop-shadow(0 2px 2px #6b371c55);
+}
+
+.cup-preview.lucky small {
+  color: #a66a15;
+  text-shadow: 0 0 5px #ffe8a8;
+}
+
 .queue .cup-preview:last-child .sprite-icon {
   width: 25px;
   height: 34px;
