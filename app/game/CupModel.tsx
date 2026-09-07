@@ -4,6 +4,8 @@ import { useGLTF } from '@react-three/drei';
 import { useMemo } from 'react';
 import * as THREE from 'three';
 import {
+  CUP_MODEL_HEIGHT,
+  CUP_MODEL_RADIUS,
   CupKind,
   GraphicsQuality,
   LEVELS,
@@ -14,7 +16,7 @@ import {
 
 type CupNodes = Record<string, THREE.Mesh>;
 
-const MODEL_INFO: Record<CupKind, { node: string; radius: number; height: number }> = {
+const LEGACY_MODEL_INFO: Record<CupKind, { node: string; radius: number; height: number }> = {
   juice: { node: 'JuiceShell', radius: 0.96, height: 2.24 },
   sundae: { node: 'SundaeShell', radius: 0.98, height: 2.02 },
   wine: { node: 'WineShell', radius: 0.98, height: 2.17 },
@@ -30,150 +32,26 @@ function liquidColor(theme: Theme, level: number) {
   return LEVELS[level]?.color ?? LEVELS[0].color;
 }
 
-function GlassMaterial({ premium, quality }: { premium: boolean; quality: GraphicsQuality }) {
-  if (!premium || quality === 'eco') {
-    return <meshStandardMaterial color="#e6fbff" transparent opacity={0.48} roughness={0.18} metalness={0.02} depthWrite={false}/>;
-  }
-  return <meshPhysicalMaterial
-    color="#f4fdff"
-    transparent
-    opacity={quality === 'cinematic' ? 0.4 : 0.46}
-    transmission={quality === 'cinematic' ? 0.28 : 0}
-    thickness={0.18}
-    ior={1.45}
-    roughness={0.06}
-    metalness={0.02}
-    clearcoat={0.88}
-    clearcoatRoughness={0.08}
-    envMapIntensity={0.72}
-    depthWrite={false}
-  />;
-}
+const glassMaterialCache = new Map<string, THREE.Material>();
 
-function LiquidMaterial({ color, premium, quality, emissive = false }: { color: string; premium: boolean; quality: GraphicsQuality; emissive?: boolean }) {
-  if (!premium || quality === 'eco') return <meshStandardMaterial color={color} roughness={0.32} metalness={0.02}/>;
-  return <meshPhysicalMaterial
-    color={color}
-    emissive={emissive ? color : '#000000'}
-    emissiveIntensity={emissive ? 0.13 : 0}
-    transparent
-    opacity={0.9}
-    transmission={quality === 'cinematic' ? 0.06 : 0}
-    roughness={0.16}
-    metalness={0.03}
-    clearcoat={0.55}
-    clearcoatRoughness={0.12}
-  />;
-}
-
-function Citrus({ color = '#ffd844', position = [0.48, 2.08, 0] as [number, number, number] }) {
-  return <group position={position} rotation={[Math.PI / 2, 0.2, 0.08]}>
-    <mesh castShadow><cylinderGeometry args={[0.24, 0.24, 0.055, 24]}/><meshStandardMaterial color={color} roughness={0.45}/></mesh>
-    <mesh position={[0, 0.031, 0]}><torusGeometry args={[0.18, 0.018, 8, 24]}/><meshStandardMaterial color="#fff4b0"/></mesh>
-  </group>;
-}
-
-function Leaves({ position = [-0.24, 2.08, 0] as [number, number, number], count = 2 }) {
-  return <group position={position}>
-    {Array.from({ length: count }, (_, index) => <mesh key={index} castShadow
-      position={[(index - (count - 1) / 2) * 0.16, index % 2 ? 0.05 : 0, 0]}
-      rotation={[0.25, index * 1.2, index % 2 ? -0.55 : 0.55]}
-      scale={[0.24, 0.08, 0.42]}>
-      <sphereGeometry args={[1, 12, 8]}/><meshStandardMaterial color={index % 2 ? '#2d9b43' : '#64c54d'} roughness={0.68}/>
-    </mesh>)}
-  </group>;
-}
-
-function BerryCluster({ color = '#75319e', position = [0, 2.1, 0] as [number, number, number], count = 4 }) {
-  const points = [[0, 0, 0], [0.18, -0.04, 0.03], [-0.16, -0.05, 0.05], [0.06, 0.12, -0.03], [-0.05, -0.14, -0.02]];
-  return <group position={position}>
-    {points.slice(0, count).map((point, index) => <mesh key={index} castShadow position={point as [number, number, number]}>
-      <sphereGeometry args={[0.12, 14, 10]}/><meshPhysicalMaterial color={color} roughness={0.24} clearcoat={0.6}/>
-    </mesh>)}
-  </group>;
-}
-
-function Straw({ position = [0.36, 1.78, 0] as [number, number, number], color = '#ef523b' }) {
-  return <group position={position} rotation={[0, 0, -0.23]}>
-    <mesh castShadow><cylinderGeometry args={[0.035, 0.035, 1.25, 12]}/><meshStandardMaterial color="#fff7e7" roughness={0.45}/></mesh>
-    {[0.16, 0.42, 0.68, 0.94].map((y) => <mesh key={y} position={[0, y - 0.62, 0]}>
-      <cylinderGeometry args={[0.039, 0.039, 0.11, 12]}/><meshStandardMaterial color={color}/>
-    </mesh>)}
-  </group>;
-}
-
-function Watermelon({ position = [0.48, 2.02, 0] as [number, number, number] }) {
-  return <group position={position} rotation={[Math.PI / 2, 0.35, 0]}>
-    <mesh castShadow><cylinderGeometry args={[0.3, 0.3, 0.075, 3, 1, false, 0, Math.PI]}/><meshStandardMaterial color="#f34359" roughness={0.4}/></mesh>
-    <mesh position={[0, -0.045, 0]} scale={[1.08, 1, 1.08]}><torusGeometry args={[0.25, 0.036, 8, 18, Math.PI]}/><meshStandardMaterial color="#3b9d4a"/></mesh>
-  </group>;
-}
-
-function SundaeTop({ level, color, premium, quality }: { level: number; color: string; premium: boolean; quality: GraphicsQuality }) {
-  return <group position={[0, 1.84, 0]}>
-    <mesh castShadow scale={[0.76, 0.45, 0.76]}><sphereGeometry args={[1, 24, 16]}/><LiquidMaterial color={color} premium={premium} quality={quality}/></mesh>
-    <mesh position={[0, 0.35, 0]} castShadow scale={[0.53, 0.32, 0.53]}><sphereGeometry args={[1, 20, 14]}/><meshPhysicalMaterial color="#fff8e7" roughness={0.24} clearcoat={0.28}/></mesh>
-    {level === 0 && <mesh position={[0.18, 0.6, 0]} rotation={[0.2, 0, -0.35]} castShadow><boxGeometry args={[0.28, 0.38, 0.08]}/><meshStandardMaterial color="#f4cc77" roughness={0.65}/></mesh>}
-    {level === 1 && <Citrus color="#e48b2f" position={[0.42, 0.42, 0]}/>}
-    {level === 2 && <BerryCluster color="#7e2f29" position={[0.05, 0.56, 0]} count={4}/>}
-    {level === 3 && <group position={[0.28, 0.48, 0]} rotation={[0.1, 0, -0.4]}><mesh castShadow><boxGeometry args={[0.34, 0.44, 0.1]}/><meshStandardMaterial color="#3b2119" roughness={0.7}/></mesh></group>}
-    {level === 4 && <BerryCluster color="#5146ab" position={[0.04, 0.57, 0]} count={5}/>}
-    {level === 5 && <BerryCluster color="#b71735" position={[0, 0.58, 0]} count={3}/>}
-    {level === 6 && <><BerryCluster color="#e22854" position={[0, 0.58, 0]} count={3}/><mesh position={[0, 0.78, 0]} rotation={[0, 0, Math.PI / 4]} castShadow><torusGeometry args={[0.18, 0.045, 8, 4]}/><meshStandardMaterial color="#f7c43e" metalness={0.65} roughness={0.22}/></mesh></>}
-  </group>;
-}
-
-function JuiceLiquid({ level, color, premium, quality }: { level: number; color: string; premium: boolean; quality: GraphicsQuality }) {
-  if (level !== 6) return <mesh position={[0, 1.08, 0]} castShadow receiveShadow>
-    <cylinderGeometry args={[0.82, 0.6, 1.68, 32]}/><LiquidMaterial color={color} premium={premium} quality={quality}/>
-  </mesh>;
-  const rainbow = ['#7a4acb', '#2aa8df', '#43bd70', '#f1d33c', '#ff8c2a', '#ef405f'];
-  return <group>
-    {rainbow.map((layer, index) => <mesh key={layer} position={[0, 0.37 + index * 0.275, 0]} castShadow>
-      <cylinderGeometry args={[0.64 + index * 0.031, 0.61 + index * 0.031, 0.29, 32]}/>
-      <LiquidMaterial color={layer} premium={premium} quality={quality} emissive={index === rainbow.length - 1}/>
-    </mesh>)}
-  </group>;
-}
-
-function JuiceDetails({ level, premium }: { level: number; premium: boolean }) {
-  if (!premium) return level === 1 ? <Straw/> : null;
-  return <>
-    {level === 0 && <><Citrus/><Leaves count={1}/></>}
-    {level === 1 && <><Citrus color="#ff962e"/><Straw/></>}
-    {level === 2 && <><BerryCluster color="#f0445d" position={[0.06, 2.12, 0]} count={3}/><Leaves count={1}/></>}
-    {level === 3 && <><BerryCluster/><Leaves position={[-0.18, 2.16, 0]} count={2}/></>}
-    {level === 4 && <><Citrus color="#84d95d"/><Leaves count={3}/></>}
-    {level === 5 && <><Watermelon/><Leaves count={2}/></>}
-    {level === 6 && <><Citrus/><BerryCluster color="#e32745" position={[0, 2.26, 0]} count={1}/><Leaves count={2}/></>}
-  </>;
-}
-
-function WineDetails({ level, premium }: { level: number; premium: boolean }) {
-  if (!premium) return null;
-  return <>
-    {level === 0 && <Citrus color="#d7f4ff" position={[0.48, 2.07, 0]}/>}
-    {level === 1 && <Leaves position={[-0.12, 2.14, 0]} count={2}/>}
-    {level === 2 && <BerryCluster color="#f5c9dc" position={[0.1, 2.16, 0]} count={2}/>}
-    {level === 3 && <><BerryCluster color="#6d84f2" position={[0.08, 2.16, 0]} count={2}/><Leaves count={1}/></>}
-    {level === 4 && <Leaves position={[0, 2.13, 0]} count={3}/>}
-    {level === 5 && <BerryCluster color="#d1254e" position={[0.08, 2.15, 0]} count={4}/>}
-    {level === 6 && <><mesh position={[0, 2.24, 0]} rotation={[0, 0, Math.PI / 4]} castShadow><torusGeometry args={[0.2, 0.04, 8, 6]}/><meshStandardMaterial color="#ffe982" emissive="#a56cff" emissiveIntensity={0.5} metalness={0.45}/></mesh><BerryCluster color="#63dce2" position={[0.05, 2.12, 0]} count={3}/></>}
-  </>;
-}
-
-function IceAndBubbles({ premium, kind, quality }: { premium: boolean; kind: CupKind; quality: GraphicsQuality }) {
-  if (!premium || kind === 'sundae' || quality === 'eco') return null;
-  const ice = [[-0.25, 1.0, 0.15], [0.24, 1.34, -0.1], [0.1, 0.72, 0.23]];
-  const bubbles = [[-0.36, 1.46, 0.22], [0.32, 1.1, 0.25], [-0.12, 1.75, 0.3], [0.42, 1.66, -0.08]];
-  return <>
-    {ice.map((position, index) => <mesh key={`ice-${index}`} position={position as [number, number, number]} rotation={[0.2 * index, 0.35 * index, 0.14]} castShadow>
-      <boxGeometry args={[0.36, 0.31, 0.32]}/><meshPhysicalMaterial color="#f7ffff" transparent opacity={0.36} roughness={0.08} transmission={quality === 'cinematic' ? 0.35 : 0}/>
-    </mesh>)}
-    {bubbles.map((position, index) => <mesh key={`bubble-${index}`} position={position as [number, number, number]}>
-      <sphereGeometry args={[0.035 + index * 0.006, 8, 6]}/><meshStandardMaterial color="#ffffff" transparent opacity={0.7}/>
-    </mesh>)}
-  </>;
+function glassMaterial(premium: boolean, quality: GraphicsQuality) {
+  const key = `${premium ? 'premium' : 'simple'}-${quality}`;
+  const cached = glassMaterialCache.get(key);
+  if (cached) return cached;
+  const material = quality === 'eco' || !premium
+    ? new THREE.MeshStandardMaterial({
+      color: '#e8fbff', transparent: true, opacity: premium ? 0.42 : 0.48,
+      roughness: 0.16, metalness: 0.02, side: THREE.DoubleSide, depthWrite: false,
+    })
+    : new THREE.MeshPhysicalMaterial({
+      color: '#effcff', transparent: true, opacity: quality === 'cinematic' ? 0.34 : 0.4,
+      transmission: quality === 'cinematic' ? 0.5 : 0, thickness: 0.16, ior: 1.46,
+      roughness: 0.045, metalness: 0.015, clearcoat: 0.92, clearcoatRoughness: 0.06,
+      envMapIntensity: 0.92, side: THREE.DoubleSide, depthWrite: false,
+    });
+  material.name = `V51RuntimeGlass-${key}`;
+  glassMaterialCache.set(key, material);
+  return material;
 }
 
 const levelTextures = new Map<number, THREE.CanvasTexture>();
@@ -184,15 +62,18 @@ function getLevelTexture(level: number) {
   canvas.width = 96;
   canvas.height = 96;
   const context = canvas.getContext('2d')!;
+  const gradient = context.createRadialGradient(34, 25, 4, 48, 48, 44);
+  gradient.addColorStop(0, '#ffffff');
+  gradient.addColorStop(1, '#fff0cf');
   context.beginPath();
   context.arc(48, 48, 42, 0, Math.PI * 2);
-  context.fillStyle = '#fff9e8';
+  context.fillStyle = gradient;
   context.fill();
-  context.lineWidth = 7;
+  context.lineWidth = 6;
   context.strokeStyle = LEVELS[level].dark;
   context.stroke();
-  context.fillStyle = '#5a2e1c';
-  context.font = '900 49px Arial';
+  context.fillStyle = '#512717';
+  context.font = '900 48px Arial';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.fillText(String(level + 1), 48, 51);
@@ -202,11 +83,91 @@ function getLevelTexture(level: number) {
   return texture;
 }
 
-function LevelBadge({ level, height }: { level: number; height: number }) {
+function LevelBadge({ level, height, radius }: { level: number; height: number; radius: number }) {
   const texture = useMemo(() => getLevelTexture(level), [level]);
-  return <sprite position={[0, height * 0.58, 0.99]} scale={[0.5, 0.5, 0.5]}>
+  return <sprite position={[0, height * 0.56, radius * 1.04]} scale={[0.5, 0.5, 0.5]} renderOrder={9}>
     <spriteMaterial map={texture} transparent depthTest={false}/>
   </sprite>;
+}
+
+function SimpleCup({
+  theme,
+  level,
+  radius,
+  height,
+  quality,
+  preview,
+}: {
+  theme: Theme;
+  level: number;
+  radius: number;
+  height: number;
+  quality: GraphicsQuality;
+  preview: boolean;
+}) {
+  const gltf = useGLTF('/models/cups-v5.glb');
+  const kind = kindForTheme(theme);
+  const info = LEGACY_MODEL_INFO[kind];
+  const shell = (gltf.nodes as CupNodes)[info.node];
+  const color = liquidColor(theme, level);
+  const scale: [number, number, number] = [radius / info.radius, height / info.height, radius / info.radius];
+  return <group scale={scale}>
+    {kind === 'juice' && <mesh position={[0, 1.08, 0]} castShadow={!preview}>
+      <cylinderGeometry args={[0.82, 0.6, 1.68, 28]}/><meshStandardMaterial color={color} roughness={0.3}/>
+    </mesh>}
+    {kind === 'sundae' && <mesh position={[0, 1.55, 0]} scale={[0.8, 0.5, 0.8]} castShadow={!preview}>
+      <sphereGeometry args={[1, 24, 16]}/><meshStandardMaterial color={color} roughness={0.34}/>
+    </mesh>}
+    {kind === 'wine' && <mesh position={[0, 1.48, 0]} scale={[0.76, 0.5, 0.76]} castShadow={!preview}>
+      <sphereGeometry args={[1, 24, 16]}/><meshStandardMaterial color={color} roughness={0.26}/>
+    </mesh>}
+    {shell && <mesh geometry={shell.geometry} castShadow={!preview} receiveShadow={!preview}>
+      <primitive object={glassMaterial(false, quality)} attach="material"/>
+    </mesh>}
+  </group>;
+}
+
+function PremiumCup({
+  kind,
+  level,
+  radius,
+  height,
+  quality,
+  microDetails,
+  preview,
+}: {
+  kind: CupKind;
+  level: number;
+  radius: number;
+  height: number;
+  quality: GraphicsQuality;
+  microDetails: boolean;
+  preview: boolean;
+}) {
+  const gltf = useGLTF('/models/cups-v51.glb');
+  const template = gltf.scene.getObjectByName(`Cup_${kind}_${level}`);
+  const model = useMemo(() => {
+    if (!template) return null;
+    const clone = template.clone(true);
+    clone.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const role = object.userData.role as string | undefined;
+      const isGlass = role === 'glass' || object.name.endsWith('_Glass');
+      const isDetail = role === 'detail' || object.name.endsWith('_Detail');
+      const isMicro = role === 'micro' || object.name.endsWith('_Micro');
+      object.visible = !isMicro || (microDetails && quality !== 'eco');
+      if (isGlass) object.material = glassMaterial(true, quality);
+      object.castShadow = !preview && quality !== 'eco' && !isGlass;
+      object.receiveShadow = !preview;
+      object.renderOrder = isGlass ? 5 : isDetail ? 4 : 3;
+    });
+    return clone;
+  }, [microDetails, preview, quality, template]);
+  const scale: [number, number, number] = [radius / CUP_MODEL_RADIUS, height / CUP_MODEL_HEIGHT, radius / CUP_MODEL_RADIUS];
+  const simpleTheme = `simple${kind === 'juice' ? 'Juice' : kind === 'sundae' ? 'Sundae' : 'Wine'}` as Theme;
+  return model
+    ? <primitive object={model} scale={scale}/>
+    : <SimpleCup theme={simpleTheme} level={level} radius={radius} height={height} quality={quality} preview={preview}/>;
 }
 
 export function CupModel3D({
@@ -230,31 +191,20 @@ export function CupModel3D({
   microDetails?: boolean;
   preview?: boolean;
 }) {
-  const gltf = useGLTF('/models/cups-v5.glb');
-  const nodes = gltf.nodes as CupNodes;
   const kind = kindForTheme(theme);
-  const info = MODEL_INFO[kind];
-  const shell = nodes[info.node];
   const premium = isPremiumTheme(theme);
-  const color = liquidColor(theme, level);
-  const scale: [number, number, number] = [radius / info.radius, height / info.height, radius / info.radius];
-
-  return <group scale={scale} renderOrder={preview ? 4 : 1}>
-    {kind === 'juice' && <JuiceLiquid level={level} color={color} premium={premium} quality={quality}/>}
-    {kind === 'sundae' && <SundaeTop level={level} color={color} premium={premium} quality={quality}/>}
-    {kind === 'wine' && <mesh position={[0, 1.48, 0]} scale={[0.92, 0.58, 0.92]} castShadow={!preview}>
-      <sphereGeometry args={[0.82, 28, 18]}/><LiquidMaterial color={color} premium={premium} quality={quality} emissive={level >= 5}/>
+  return <group>
+    {premium
+      ? <PremiumCup kind={kind} level={level} radius={radius} height={height} quality={quality} microDetails={microDetails} preview={preview}/>
+      : <SimpleCup theme={theme} level={level} radius={radius} height={height} quality={quality} preview={preview}/>
+    }
+    {showHalo && <mesh position={[0, height * 1.025, 0]} rotation={[Math.PI / 2, 0, 0]} renderOrder={8}>
+      <torusGeometry args={[radius * 0.92, Math.max(0.018, radius * 0.035), 8, 42]}/>
+      <meshBasicMaterial color={LEVELS[level].accent} transparent opacity={preview ? 0.45 : 0.3} depthWrite={false} depthTest={false}/>
     </mesh>}
-    {microDetails && <IceAndBubbles premium={premium} kind={kind} quality={quality}/>}
-    {shell && <mesh geometry={shell.geometry} castShadow={!preview} receiveShadow>
-      <GlassMaterial premium={premium} quality={quality}/>
-    </mesh>}
-    {kind === 'juice' && <JuiceDetails level={level} premium={premium}/>}
-    {kind === 'wine' && <WineDetails level={level} premium={premium}/>}
-    {showHalo && <mesh position={[0, info.height + 0.08, 0]} rotation={[Math.PI / 2, 0, 0]} renderOrder={6}>
-      <torusGeometry args={[0.8, 0.035, 8, 38]}/>
-      <meshBasicMaterial color={LEVELS[level].accent} transparent opacity={preview ? 0.42 : 0.28} depthWrite={false}/>
-    </mesh>}
-    {showLevel && <LevelBadge level={level} height={info.height}/>}
+    {showLevel && <LevelBadge level={level} height={height} radius={radius}/>}
   </group>;
 }
+
+useGLTF.preload('/models/cups-v51.glb');
+useGLTF.preload('/models/cups-v5.glb');

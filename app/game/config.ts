@@ -160,9 +160,10 @@ export type GameSnapshot = {
   luckyCooldown: number;
 };
 
-export const LANE_WIDTH = 5.6;
+export const ASSET_VERSION = V51_ASSET_SPEC.version;
+export const LANE_WIDTH = V51_ASSET_SPEC.lane.width;
 export const LANE_HALF = LANE_WIDTH / 2;
-export const LANE_LENGTH = 19.6;
+export const LANE_LENGTH = V51_ASSET_SPEC.lane.length;
 export const LANE_NEAR = LANE_LENGTH / 2;
 export const LANE_FAR = -LANE_LENGTH / 2;
 export const SPAWN_Z = LANE_NEAR - 1.38;
@@ -170,6 +171,10 @@ export const FIXED_DANGER_Z = LANE_NEAR - 2.7;
 export const DYNAMIC_DANGER_START_Z = LANE_NEAR - 4.35;
 export const DYNAMIC_DANGER_MIN_Z = LANE_FAR + 2.1;
 export const BASE_CUP_RADIUS = 0.46;
+export const CUP_MODEL_RADIUS = V51_ASSET_SPEC.cup.modelRadius;
+export const CUP_MODEL_HEIGHT = V51_ASSET_SPEC.cup.modelHeight;
+export const CUP_COLLIDER_SLICES = V51_ASSET_SPEC.cup.colliderSlices;
+export const LANE_ASSET = V51_ASSET_SPEC.lane;
 export const SPEED_TO_WORLD = 1.55;
 export const LEGACY_TO_WORLD = LANE_LENGTH / 640;
 export const STORAGE_KEY = 'juice-v5-settings';
@@ -214,4 +219,5 @@ export const cloneCup = (cup: CupState): CupState => ({
   rotation: [...cup.rotation],
   angularVelocity: [...cup.angularVelocity],
 });
+import V51_ASSET_SPEC from './v51-asset-spec.json';
 

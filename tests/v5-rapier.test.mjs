@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import RAPIER from '@dimforge/rapier3d-compat';
 
 await RAPIER.init({});
 
-const HALF_WIDTH = 2.8;
-const HALF_LENGTH = 9.8;
+const ASSET_SPEC = JSON.parse(readFileSync(new URL('../app/game/v51-asset-spec.json', import.meta.url), 'utf8'));
+const HALF_WIDTH = ASSET_SPEC.lane.width / 2;
+const HALF_LENGTH = ASSET_SPEC.lane.length / 2;
 const RADIUS = 0.46;
 const HEIGHT = 1.357;
 
@@ -21,11 +23,12 @@ function buildWorld() {
   world.timestep = 1 / 60;
   world.maxCcdSubsteps = 2;
   world.numSolverIterations = 8;
-  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(HALF_WIDTH, 0.12, HALF_LENGTH).setTranslation(0, -0.12, 0), 0));
-  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(0.18, 0.36, HALF_LENGTH + 0.15).setTranslation(-2.98, 0.25, 0), 0.91));
-  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(0.18, 0.36, HALF_LENGTH + 0.15).setTranslation(2.98, 0.25, 0), 0.91));
-  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(3.15, 0.76, 0.17).setTranslation(0, 0.64, -9.98), 0.12));
-  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(3.15, 0.3, 0.18).setTranslation(0, 0.1, 9.98), 0.04));
+  const lane = ASSET_SPEC.lane;
+  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(HALF_WIDTH, lane.surfaceThickness / 2, HALF_LENGTH).setTranslation(0, -lane.surfaceThickness / 2, 0), 0));
+  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(lane.railWidth / 2, lane.railHeight / 2, HALF_LENGTH + 0.15).setTranslation(-lane.railCenterX, 0.25, 0), 0.91));
+  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(lane.railWidth / 2, lane.railHeight / 2, HALF_LENGTH + 0.15).setTranslation(lane.railCenterX, 0.25, 0), 0.91));
+  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(lane.frontWallWidth / 2, lane.frontWallHeight / 2, lane.frontWallDepth / 2).setTranslation(0, lane.frontWallCenterY, lane.frontWallCenterZ), 0.12));
+  world.createCollider(collider(RAPIER.ColliderDesc.cuboid(3.15, 0.3, 0.18).setTranslation(0, 0.1, lane.nearBumperCenterZ), 0.04));
   return world;
 }
 
@@ -37,12 +40,10 @@ function addCup(world, x, z, velocity = { x: 0, y: 0, z: 0 }) {
     .setAngularDamping(2.4)
     .setCcdEnabled(true));
   body.setEnabledRotations(false, true, false, true);
-  world.createCollider(collider(RAPIER.ColliderDesc.cylinder(HEIGHT * 0.065, RADIUS * 0.52)
-    .setTranslation(0, HEIGHT * 0.065, 0), 0.22, 0.12), body);
-  world.createCollider(collider(RAPIER.ColliderDesc.cylinder(HEIGHT * 0.16, RADIUS * 0.73)
-    .setTranslation(0, HEIGHT * 0.34, 0), 0.22, 0.12), body);
-  world.createCollider(collider(RAPIER.ColliderDesc.cylinder(HEIGHT * 0.245, RADIUS * 0.985)
-    .setTranslation(0, HEIGHT * 0.69, 0), 0.22, 0.12), body);
+  for (const slice of ASSET_SPEC.cup.colliderSlices) {
+    world.createCollider(collider(RAPIER.ColliderDesc.cylinder(HEIGHT * slice.halfHeight, RADIUS * slice.radius)
+      .setTranslation(0, HEIGHT * slice.centerY, 0), 0.22, 0.12).setDensity(slice.density), body);
+  }
   return body;
 }
 
@@ -50,10 +51,14 @@ test('continuous collision detection keeps a fast throw between the physical rai
   const world = buildWorld();
   const cup = addCup(world, 0, 8.4, { x: 18, y: 0, z: -16 });
   let reflected = false;
+  let maximumX = 0;
+  const narrowestRailContact = Math.min(...ASSET_SPEC.cup.colliderSlices.slice(1).map((slice) => slice.radius));
   for (let step = 0; step < 240; step += 1) {
     world.step();
     if (cup.linvel().x < -0.3) reflected = true;
-    assert.ok(Math.abs(cup.translation().x) <= HALF_WIDTH - RADIUS * 0.45 + 0.04);
+    maximumX = Math.max(maximumX, Math.abs(cup.translation().x));
+    assert.ok(Math.abs(cup.translation().x) <= HALF_WIDTH - RADIUS * narrowestRailContact + 0.04,
+      `cup escaped the visible rail envelope at x=${cup.translation().x}, max=${maximumX}`);
     assert.ok(Number.isFinite(cup.translation().z));
   }
   assert.ok(reflected, 'the cup should hit and reflect from a side rail');

@@ -11,8 +11,8 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .test-build",
     "typecheck": "tsc --noEmit --incremental false",
-    "test:v5": "esbuild tests/v5-core.test.ts --bundle --platform=node --format=esm --outfile=.test-build/v5-core.test.mjs && node --test .test-build/v5-core.test.mjs && node --test tests/v5-camera.test.mjs tests/v5-rapier.test.mjs",
-    "check:v5": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .test-build && tsc --noEmit --incremental false && esbuild tests/v5-core.test.ts --bundle --platform=node --format=esm --outfile=.test-build/v5-core.test.mjs && node --test .test-build/v5-core.test.mjs && node --test tests/v5-camera.test.mjs tests/v5-rapier.test.mjs && vinext build"
+    "test:v5": "esbuild tests/v5-core.test.ts --bundle --platform=node --format=esm --outfile=.test-build/v5-core.test.mjs && node --test .test-build/v5-core.test.mjs && node --test tests/v5-camera.test.mjs tests/v5-rapier.test.mjs tests/v51-assets.test.mjs tests/v51-gltf.test.mjs",
+    "check:v5": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .test-build && tsc --noEmit --incremental false && esbuild tests/v5-core.test.ts --bundle --platform=node --format=esm --outfile=.test-build/v5-core.test.mjs && node --test .test-build/v5-core.test.mjs && node --test tests/v5-camera.test.mjs tests/v5-rapier.test.mjs tests/v51-assets.test.mjs tests/v51-gltf.test.mjs && vinext build"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.19.2",

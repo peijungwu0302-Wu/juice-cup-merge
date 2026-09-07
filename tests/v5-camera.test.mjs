@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import * as THREE from 'three';
+
+const ASSET_SPEC = JSON.parse(readFileSync(new URL('../app/game/v51-asset-spec.json', import.meta.url), 'utf8'));
 
 const project = (camera, point) => new THREE.Vector3(...point).project(camera);
 
@@ -11,10 +14,12 @@ test('the full 3D lane and front wall fit inside an iPhone 15 Pro playfield', ()
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
 
-  const nearLeft = project(camera, [-3.16, 0.098, 9.8]);
-  const nearRight = project(camera, [3.16, 0.098, 9.8]);
-  const laneEnd = project(camera, [0, -0.098, -9.8]);
-  const wallTop = project(camera, [0, 1.42, -9.98]);
+  const outerRail = ASSET_SPEC.lane.railCenterX + ASSET_SPEC.lane.railWidth / 2;
+  const halfLength = ASSET_SPEC.lane.length / 2;
+  const nearLeft = project(camera, [-outerRail, 0.098, halfLength]);
+  const nearRight = project(camera, [outerRail, 0.098, halfLength]);
+  const laneEnd = project(camera, [0, -0.098, -halfLength]);
+  const wallTop = project(camera, [0, ASSET_SPEC.lane.frontWallCenterY + ASSET_SPEC.lane.frontWallHeight / 2, ASSET_SPEC.lane.frontWallCenterZ]);
   const launchCupTop = project(camera, [0, 1.44, 8.42]);
 
   assert.ok(nearLeft.x > -0.95 && nearRight.x < 0.95, 'both near rails must remain visible');

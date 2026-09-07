@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  ASSET_VERSION,
+  CUP_COLLIDER_SLICES,
   DEFAULTS,
   DEFAULT_LEVEL_SIZES,
   DYNAMIC_DANGER_MIN_Z,
@@ -20,6 +22,7 @@ const settings = (patch: Partial<Settings> = {}): Settings => ({
 });
 
 test('V5 ships with the approved default presentation and throw values', () => {
+  assert.equal(ASSET_VERSION, '5.1.0');
   assert.equal(DEFAULTS.theme, 'premiumJuice');
   assert.equal(DEFAULTS.dynamicDanger, false);
   assert.equal(DEFAULTS.straightStabilizer, true);
@@ -29,6 +32,13 @@ test('V5 ships with the approved default presentation and throw values', () => {
   assert.equal(DEFAULTS.minPower, 10);
   assert.equal(DEFAULTS.maxPower, 16);
   assert.equal(DEFAULTS.size, 1);
+});
+
+test('V5.1 uses one five-slice rim-led envelope for every visual theme', () => {
+  assert.equal(CUP_COLLIDER_SLICES.length, 5);
+  assert.equal(CUP_COLLIDER_SLICES.at(-1)?.name, 'rim');
+  assert.equal(CUP_COLLIDER_SLICES.at(-1)?.radius, 0.985);
+  assert.equal((CUP_COLLIDER_SLICES.at(-1)?.centerY ?? 0) + (CUP_COLLIDER_SLICES.at(-1)?.halfHeight ?? 0), 1);
 });
 
 test('V5 keeps visual and physical sizes independent from the selected theme', () => {

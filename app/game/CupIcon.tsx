@@ -30,12 +30,20 @@ function MiniGarnish({ level, kind }: { level: number; kind: ReturnType<typeof k
 
 export function CupIcon({ level, theme, className = '' }: { level: number; theme: Theme; className?: string }) {
   const rawId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const kind = kindForTheme(theme);
+  const premium = isPremiumTheme(theme);
+  if (premium) {
+    return <span
+      className={`cup-icon rendered-cup-icon ${className}`}
+      role="img"
+      aria-label={levelName(theme, level)}
+      style={{ backgroundImage: `url(/icons/v51/${kind}-${level + 1}.png)` }}
+    />;
+  }
   const gradientId = `liquid-${rawId}`;
   const glassId = `glass-${rawId}`;
   const color = colorFor(theme, level);
   const dark = kindForTheme(theme) === 'juice' ? LEVELS[level].dark : color;
-  const kind = kindForTheme(theme);
-  const premium = isPremiumTheme(theme);
   return <svg className={`cup-icon ${className}`} viewBox="0 0 70 96" role="img" aria-label={levelName(theme, level)}>
     <defs>
       <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">

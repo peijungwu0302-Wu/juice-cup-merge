@@ -792,7 +792,7 @@ export default function Home() {
     reset(settingsRef.current);
   }, [reset]);
 
-  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5">
+  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.1">
     <header className="hud">
       <div className="score-main hud-tile"><small>分數</small><strong>{score.toLocaleString()}</strong><em>最高 {best.toLocaleString()}・零復活 {bestClean.toLocaleString()}</em></div>
       <div className="orders hud-tile"><small>訂單</small><b>{orders}</b><em>累積 {lifetimeOrders}</em></div>
@@ -807,12 +807,12 @@ export default function Home() {
         dangerLine={dangerLine} bursts={bursts} restoreEpoch={restoreEpoch} safeUntilRef={safeUntilRef}
         onCamera={handleCamera} onCupCollision={handleCupCollision}
         onGameOver={handleGameOver} onRecycle={handleRecycle} onReady={handleSceneReady}/></Suspense></SceneBoundary>}
-      {!sceneReady && <div className="scene-loading"><span/><b>正在準備 3D 跑道</b></div>}
+      {!sceneReady && <div className="scene-loading"><span/><b>正在準備精品 3D 跑道</b></div>}
       <div className="field-badges">
         {historyCount > 0 && <button onClick={undo} aria-label={`復原上一步，尚有 ${historyCount} 次`}>↶ <small>{historyCount}</small></button>}
         {revives > 0 && <span>復活 {revives}</span>}
         {settings.dynamicDanger && <span className="danger-mode">動態線</span>}
-        <span className="physics-mode">3D</span>
+        <span className="physics-mode">3D 5.1</span>
       </div>
       {settings.angle && <button className={`aim-state ${aim.locked ? 'locked' : ''}`} onClick={toggleAimLock}>{aim.locked ? '角度已鎖定・點此解鎖' : '拖曳預測線調角度・點此鎖定'}</button>}
       {powerPreview > 0 && <div className="power-meter"><i style={{ height: `${Math.max(8, powerPreview * 100)}%` }}/><span>{settings.power ? '力度' : '有效'}</span></div>}
@@ -854,7 +854,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
     <header><div><small>遊戲設定</small><h2>玩法、3D 與手感</h2></div><button onClick={close} aria-label="關閉設定">×</button></header>
     <div className="sheet-scroll">
       <div className="theme-picker">
-        <ThemeButton value="premiumJuice" current={settings.theme} title="精緻果汁" patch={patch}/><ThemeButton value="premiumSundae" current={settings.theme} title="精緻聖代" patch={patch}/><ThemeButton value="premiumWine" current={settings.theme} title="精緻酒杯" patch={patch}/>
+        <ThemeButton value="premiumJuice" current={settings.theme} title="精品果汁吧" patch={patch}/><ThemeButton value="premiumSundae" current={settings.theme} title="聖代工房" patch={patch}/><ThemeButton value="premiumWine" current={settings.theme} title="水晶酒窖" patch={patch}/>
         <ThemeButton value="simpleJuice" current={settings.theme} title="果汁陽春" patch={patch}/><ThemeButton value="simpleSundae" current={settings.theme} title="聖代陽春" patch={patch}/><ThemeButton value="simpleWine" current={settings.theme} title="酒杯陽春" patch={patch}/>
       </div>
       <div className="quality-picker"><QualityButton value="eco" current={settings.quality} title="省電" note="較低畫質" patch={patch}/><QualityButton value="balanced" current={settings.quality} title="平衡" note="手機預設" patch={patch}/><QualityButton value="cinematic" current={settings.quality} title="電影" note="完整光影" patch={patch}/></div>
@@ -875,7 +875,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(value) => patch({ throwThreshold: value })}/>
       </div>
       <details className="developer"><summary>開發者專區 <span>即時調整真 3D 手感</span></summary>
-        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5 預設</button></div>
+        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.1 預設</button></div>
         <Toggle title="顯示 3D 碰撞體" note="直接顯示 Rapier 的杯身、護欄、跑道與前牆" value={settings.debugHitboxes} onChange={(value) => patch({ debugHitboxes: value })}/>
         <Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(value) => patch({ maxAngle: value })}/>
         <Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(value) => patch({ fixedSpeed: value })}/>

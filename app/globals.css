@@ -194,6 +194,12 @@ button { -webkit-tap-highlight-color: transparent; }
   filter: drop-shadow(0 2px 2px #4b271c40);
 }
 
+.rendered-cup-icon {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
 .cup-preview.lucky .sprite-icon,
 .cup-preview.lucky .simple-icon,
 .cup-preview.lucky .cup-icon {

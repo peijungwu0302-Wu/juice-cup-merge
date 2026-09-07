@@ -1,0 +1,28 @@
+{
+  "version": "5.1.0",
+  "lane": {
+    "width": 5.6,
+    "length": 19.6,
+    "surfaceThickness": 0.24,
+    "railWidth": 0.36,
+    "railHeight": 0.72,
+    "railCenterX": 2.98,
+    "frontWallWidth": 6.3,
+    "frontWallHeight": 1.52,
+    "frontWallDepth": 0.34,
+    "frontWallCenterY": 0.64,
+    "frontWallCenterZ": -9.98,
+    "nearBumperCenterZ": 9.98
+  },
+  "cup": {
+    "modelRadius": 0.985,
+    "modelHeight": 2.18,
+    "colliderSlices": [
+      { "name": "foot", "centerY": 0.055, "halfHeight": 0.055, "radius": 0.58, "density": 1.5 },
+      { "name": "stem", "centerY": 0.18, "halfHeight": 0.07, "radius": 0.26, "density": 1.3 },
+      { "name": "lowerBowl", "centerY": 0.34, "halfHeight": 0.13, "radius": 0.62, "density": 1.05 },
+      { "name": "upperBowl", "centerY": 0.54, "halfHeight": 0.14, "radius": 0.9, "density": 0.9 },
+      { "name": "rim", "centerY": 0.845, "halfHeight": 0.155, "radius": 0.985, "density": 0.72 }
+    ]
+  }
+}

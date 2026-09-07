@@ -16,11 +16,11 @@ import * as THREE from 'three';
 import {
   AimState,
   BurstState,
+  CUP_COLLIDER_SLICES,
   CupState,
   GraphicsQuality,
-  LANE_FAR,
+  LANE_ASSET,
   LANE_HALF,
-  LANE_LENGTH,
   LANE_NEAR,
   Settings,
   SPAWN_Z,
@@ -84,7 +84,7 @@ function SceneReady({ onReady }: { onReady: () => void }) {
 }
 
 function LaneVisual({ slope }: { slope: number }) {
-  const gltf = useGLTF('/models/lane-v5.glb');
+  const gltf = useGLTF('/models/lane-v51.glb');
   const scene = useMemo(() => {
     const clone = gltf.scene.clone(true);
     clone.traverse((object) => {
@@ -138,6 +138,32 @@ function FruitBowl({ x, z }: { x: number; z: number }) {
   </group>;
 }
 
+function PendantLamp({ x }: { x: number }) {
+  return <group position={[x, 5.55, -10.9]}>
+    <mesh castShadow rotation={[Math.PI, 0, 0]}><coneGeometry args={[0.46, 0.62, 28, 1, true]}/><meshStandardMaterial color="#4a1f0f" metalness={0.45} roughness={0.24} side={THREE.DoubleSide}/></mesh>
+    <mesh position={[0, -0.34, 0]}><sphereGeometry args={[0.14, 18, 12]}/><meshStandardMaterial color="#ffd884" emissive="#ff932f" emissiveIntensity={2.1}/></mesh>
+    <mesh position={[0, 1.06, 0]}><cylinderGeometry args={[0.018, 0.018, 2.15, 8]}/><meshStandardMaterial color="#3b1a0e"/></mesh>
+  </group>;
+}
+
+function BottleShelf() {
+  const colors = ['#d8752d', '#4a9d67', '#7f54ad', '#e4b32f', '#b33a45', '#4f91a9'];
+  return <group position={[0, 2.72, -12.82]}>
+    <mesh castShadow><boxGeometry args={[5.4, 0.13, 0.48]}/><meshStandardMaterial color="#4b210f" roughness={0.34}/></mesh>
+    {colors.map((color, index) => <group key={color} position={[-2.05 + index * 0.82, 0.42 + (index % 2) * 0.07, 0.02]}>
+      <mesh castShadow><cylinderGeometry args={[0.14, 0.17, 0.66, 14]}/><meshPhysicalMaterial color={color} transparent opacity={0.82} roughness={0.18} clearcoat={0.55}/></mesh>
+      <mesh position={[0, 0.41, 0]}><cylinderGeometry args={[0.055, 0.07, 0.18, 12]}/><meshStandardMaterial color="#f2d7a0" metalness={0.22} roughness={0.3}/></mesh>
+    </group>)}
+  </group>;
+}
+
+function BarStool({ x, z }: { x: number; z: number }) {
+  return <group position={[x, 0, z]}>
+    <mesh castShadow position={[0, 0.68, 0]} scale={[1, 0.25, 1]}><cylinderGeometry args={[0.48, 0.42, 0.42, 24]}/><meshPhysicalMaterial color="#713419" roughness={0.38} clearcoat={0.18}/></mesh>
+    <mesh position={[0, 0.26, 0]}><cylinderGeometry args={[0.07, 0.09, 0.62, 14]}/><meshStandardMaterial color="#a76a34" metalness={0.22} roughness={0.34}/></mesh>
+  </group>;
+}
+
 function EnvironmentSet({ quality }: { quality: GraphicsQuality }) {
   return <>
     <color attach="background" args={['#d9b277']}/>
@@ -159,11 +185,13 @@ function EnvironmentSet({ quality }: { quality: GraphicsQuality }) {
     />
     <pointLight position={[4, 5, -9]} intensity={10} distance={13} color="#ffb04f"/>
     <WindowWall/>
+    {quality !== 'eco' && <><PendantLamp x={-2.25}/><PendantLamp x={0}/><PendantLamp x={2.25}/><BottleShelf/></>}
     <mesh receiveShadow position={[0, -0.48, 0]}><boxGeometry args={[18, 0.7, 31]}/><meshStandardMaterial color="#b97845" roughness={0.76}/></mesh>
     <mesh receiveShadow position={[-5.7, 0.1, -1]}><boxGeometry args={[4.3, 1.2, 22]}/><meshStandardMaterial color="#8b4f2d" roughness={0.58}/></mesh>
     <mesh receiveShadow position={[5.7, 0.1, -1]}><boxGeometry args={[4.3, 1.2, 22]}/><meshStandardMaterial color="#8b4f2d" roughness={0.58}/></mesh>
     <Plant x={-4.2} z={-7.8} scale={1.15}/><Plant x={4.15} z={-6.8}/>
     <FruitBowl x={4.25} z={1.2}/><FruitBowl x={-4.35} z={4.2}/>
+    {quality !== 'eco' && <><BarStool x={-4.35} z={-0.3}/><BarStool x={4.35} z={4.7}/></>}
     {quality === 'cinematic' && <Sparkles count={35} scale={[10, 5, 22]} size={1.4} speed={0.12} opacity={0.16} color="#fff5c7"/>}
   </>;
 }
@@ -172,35 +200,35 @@ function LanePhysics({ settings }: { settings: Settings }) {
   const angle = laneAngle(settings.slope);
   return <RigidBody type="fixed" colliders={false} rotation={[-angle, 0, 0]}>
     <CuboidCollider
-      args={[LANE_HALF, 0.12, LANE_LENGTH / 2]}
-      position={[0, -0.12, 0]}
+      args={[LANE_ASSET.width / 2, LANE_ASSET.surfaceThickness / 2, LANE_ASSET.length / 2]}
+      position={[0, -LANE_ASSET.surfaceThickness / 2, 0]}
       friction={settings.laneFriction}
       restitution={0}
     />
     <CuboidCollider
-      args={[0.18, 0.36, LANE_LENGTH / 2 + 0.15]}
-      position={[-LANE_HALF - 0.18, 0.25, 0]}
+      args={[LANE_ASSET.railWidth / 2, LANE_ASSET.railHeight / 2, LANE_ASSET.length / 2 + 0.15]}
+      position={[-LANE_ASSET.railCenterX, 0.25, 0]}
       friction={settings.laneFriction}
       restitution={settings.wallRest}
       restitutionCombineRule={3}
     />
     <CuboidCollider
-      args={[0.18, 0.36, LANE_LENGTH / 2 + 0.15]}
-      position={[LANE_HALF + 0.18, 0.25, 0]}
+      args={[LANE_ASSET.railWidth / 2, LANE_ASSET.railHeight / 2, LANE_ASSET.length / 2 + 0.15]}
+      position={[LANE_ASSET.railCenterX, 0.25, 0]}
       friction={settings.laneFriction}
       restitution={settings.wallRest}
       restitutionCombineRule={3}
     />
     <CuboidCollider
-      args={[LANE_HALF + 0.35, 0.76, 0.17]}
-      position={[0, 0.64, LANE_FAR - 0.18]}
+      args={[LANE_ASSET.frontWallWidth / 2, LANE_ASSET.frontWallHeight / 2, LANE_ASSET.frontWallDepth / 2]}
+      position={[0, LANE_ASSET.frontWallCenterY, LANE_ASSET.frontWallCenterZ]}
       friction={settings.laneFriction}
       restitution={settings.frontRest}
       restitutionCombineRule={3}
     />
     <CuboidCollider
       args={[LANE_HALF + 0.35, 0.3, 0.18]}
-      position={[0, 0.1, LANE_NEAR + 0.18]}
+      position={[0, 0.1, LANE_ASSET.nearBumperCenterZ]}
       friction={settings.laneFriction}
       restitution={0.04}
       restitutionCombineRule={3}
@@ -311,33 +339,16 @@ function CupBody({
     }}
     onCollisionExit={(event) => updateContact(event.other.collider.handle, event.other.rigidBodyObject?.userData?.cupId, false)}
   >
-    <CylinderCollider
-      args={[height * 0.065, radius * 0.52]}
-      position={[0, height * 0.065, 0]}
-      density={1.35}
+    {CUP_COLLIDER_SLICES.map((slice) => <CylinderCollider
+      key={slice.name}
+      args={[height * slice.halfHeight, radius * slice.radius]}
+      position={[0, height * slice.centerY, 0]}
+      density={slice.density}
       friction={settings.cupFriction}
       restitution={settings.cupRest}
       restitutionCombineRule={3}
       contactSkin={contactSkin}
-    />
-    <CylinderCollider
-      args={[height * 0.16, radius * 0.73]}
-      position={[0, height * 0.34, 0]}
-      density={1.05}
-      friction={settings.cupFriction}
-      restitution={settings.cupRest}
-      restitutionCombineRule={3}
-      contactSkin={contactSkin}
-    />
-    <CylinderCollider
-      args={[height * 0.245, radius * 0.985]}
-      position={[0, height * 0.69, 0]}
-      density={0.82}
-      friction={settings.cupFriction}
-      restitution={settings.cupRest}
-      restitutionCombineRule={3}
-      contactSkin={contactSkin}
-    />
+    />)}
     <CupModel3D
       theme={settings.theme}
       level={cup.level}
@@ -566,7 +577,7 @@ export function GameScene(props: SceneProps) {
       gl.outputColorSpace = THREE.SRGBColorSpace;
       gl.toneMapping = THREE.ACESFilmicToneMapping;
       gl.toneMappingExposure = 1.08;
-      gl.shadowMap.type = THREE.PCFSoftShadowMap;
+      gl.shadowMap.type = THREE.PCFShadowMap;
       if (camera instanceof THREE.PerspectiveCamera) props.onCamera(camera);
     }}
   >
@@ -575,3 +586,5 @@ export function GameScene(props: SceneProps) {
 }
 
 export type { BodyMap, ContactMap };
+
+useGLTF.preload('/models/lane-v51.glb');
