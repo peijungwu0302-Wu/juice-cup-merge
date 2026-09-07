@@ -84,36 +84,6 @@ function CameraRig({ height, visualMode, onCamera }: { height: number; visualMod
   return null;
 }
 
-function ArtLaneFrame({ slope }: { slope: number }) {
-  const angle = laneAngle(slope);
-  const railLength = LANE_ASSET.length + 0.3;
-  const innerEdge = LANE_ASSET.railCenterX - LANE_ASSET.railWidth / 2;
-  return <group rotation={[-angle, 0, 0]}>
-    {[-1, 1].map((side) => <group key={side}>
-      <mesh position={[side * LANE_ASSET.railCenterX, 0.12, 0]} renderOrder={2}>
-        <boxGeometry args={[LANE_ASSET.railWidth, 0.24, railLength]}/>
-        <meshBasicMaterial color="#75401f" toneMapped={false}/>
-      </mesh>
-      <mesh position={[side * innerEdge, 0.255, 0]} renderOrder={3}>
-        <boxGeometry args={[0.075, 0.055, railLength + 0.02]}/>
-        <meshBasicMaterial color="#ffd889" toneMapped={false}/>
-      </mesh>
-      <mesh position={[side * (LANE_ASSET.railCenterX + 0.025), 0.252, 0]} renderOrder={3}>
-        <boxGeometry args={[LANE_ASSET.railWidth - 0.08, 0.045, railLength]}/>
-        <meshBasicMaterial color="#b86b31" toneMapped={false}/>
-      </mesh>
-    </group>)}
-    <mesh position={[0, 0.14, LANE_ASSET.frontWallCenterZ]} renderOrder={2}>
-      <boxGeometry args={[LANE_ASSET.frontWallWidth, 0.28, LANE_ASSET.frontWallDepth]}/>
-      <meshBasicMaterial color="#6a351b" toneMapped={false}/>
-    </mesh>
-    <mesh position={[0, 0.305, LANE_ASSET.frontWallCenterZ + LANE_ASSET.frontWallDepth * 0.12]} renderOrder={3}>
-      <boxGeometry args={[LANE_ASSET.frontWallWidth - 0.08, 0.055, LANE_ASSET.frontWallDepth + 0.04]}/>
-      <meshBasicMaterial color="#ffd889" toneMapped={false}/>
-    </mesh>
-  </group>;
-}
-
 function SceneReady({ onReady }: { onReady: () => void }) {
   useEffect(() => onReady(), [onReady]);
   return null;
@@ -570,9 +540,6 @@ function World({ props }: { props: SceneProps }) {
     )}
     <CameraRig height={props.settings.cameraHeight} visualMode={props.settings.visualMode} onCamera={props.onCamera}/>
     <Suspense fallback={null}>
-      {props.settings.visualMode === 'art' && (
-        <ArtLaneFrame slope={props.settings.slope}/>
-      )}
       {props.settings.visualMode !== 'art' && (
         <LaneVisual slope={props.settings.slope}/>
       )}

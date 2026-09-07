@@ -277,12 +277,10 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .v5-canvas.visual-art {
   background-color: #f3d49b;
-  background-image:
-    url('/assets/lane-premium-v1.png'),
-    url('/assets/lane-premium-v1.png');
-  background-position: center, center;
-  background-repeat: no-repeat, no-repeat;
-  background-size: auto 100%, 100% 100%;
+  background-image: url('/assets/lane-premium-v54.png');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
 }
 
 .scene-loading {
