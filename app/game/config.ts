@@ -43,6 +43,7 @@ export type Settings = {
   bounces: boolean;
   sound: boolean;
   vibration: boolean;
+  simpleReleaseLaunch: boolean;
   straightStabilizer: boolean;
   straightLockDistance: number;
   debugHitboxes: boolean;
@@ -90,6 +91,7 @@ export const DEFAULTS: Settings = {
   bounces: true,
   sound: false,
   vibration: false,
+  simpleReleaseLaunch: true,
   straightStabilizer: true,
   straightLockDistance: 3,
   debugHitboxes: false,

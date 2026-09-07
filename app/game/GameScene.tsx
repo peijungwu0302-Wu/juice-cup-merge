@@ -358,6 +358,7 @@ function CupBody({
     <CupModel3D
       theme={settings.theme}
       visualMode={settings.visualMode}
+      slope={settings.slope}
       level={cup.level}
       radius={radius}
       height={height}
@@ -529,7 +530,7 @@ function PreviewCup({ level, aim, settings }: { level: number; aim: AimState; se
       <ringGeometry args={[radius * 0.9, radius * 1.14, 36]}/><meshBasicMaterial color="#fff4c5" transparent opacity={0.28} depthWrite={false}/>
     </mesh>
     <CupModel3D theme={settings.theme} level={level} radius={radius} height={height}
-      visualMode={settings.visualMode} showLevel={settings.levels} showHalo={settings.occlusionCues} quality={settings.quality} preview/>
+      visualMode={settings.visualMode} slope={settings.slope} showLevel={settings.levels} showHalo={settings.occlusionCues} quality={settings.quality} preview/>
   </group>;
 }
 

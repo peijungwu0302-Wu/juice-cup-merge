@@ -13,7 +13,7 @@ import {
   cupRadius,
   maxLaunchX,
 } from '../app/game/config';
-import { advanceDynamicDanger, isStackDanger, normalizeSettings, powerFromGesture, predictPath, selectControlledLevel, validateLevelSizes } from '../app/game/core';
+import { advanceDynamicDanger, isStackDanger, normalizeSettings, powerFromGesture, predictPath, selectControlledLevel, shouldSimpleReleaseLaunch, validateLevelSizes } from '../app/game/core';
 
 const settings = (patch: Partial<Settings> = {}): Settings => ({
   ...DEFAULTS,
@@ -22,17 +22,28 @@ const settings = (patch: Partial<Settings> = {}): Settings => ({
 });
 
 test('V5 ships with the approved default presentation and throw values', () => {
-  assert.equal(ASSET_VERSION, '5.4.0');
+  assert.equal(ASSET_VERSION, '5.5.0');
   assert.equal(DEFAULTS.theme, 'premiumJuice');
   assert.equal(DEFAULTS.visualMode, 'art');
   assert.equal(DEFAULTS.dynamicDanger, false);
   assert.equal(DEFAULTS.straightStabilizer, true);
   assert.equal(DEFAULTS.straightLockDistance, 3);
+  assert.equal(DEFAULTS.simpleReleaseLaunch, true);
   assert.equal(DEFAULTS.aimLength, 2000);
   assert.equal(DEFAULTS.fixedSpeed, 9);
   assert.equal(DEFAULTS.minPower, 10);
   assert.equal(DEFAULTS.maxPower, 16);
   assert.equal(DEFAULTS.size, 1);
+});
+
+test('simple release launches only after an intentional, uncancelled press', () => {
+  const active = settings({ angle: false, power: false, simpleReleaseLaunch: true });
+  assert.equal(shouldSimpleReleaseLaunch(active, true, false, 0, 50), true);
+  assert.equal(shouldSimpleReleaseLaunch(active, true, false, 36, 120), false);
+  assert.equal(shouldSimpleReleaseLaunch(active, false, false, 0, 120), false);
+  assert.equal(shouldSimpleReleaseLaunch(active, true, false, 0, 49), false);
+  assert.equal(shouldSimpleReleaseLaunch({ ...active, angle: true }, true, false, 0, 120), false);
+  assert.equal(shouldSimpleReleaseLaunch({ ...active, power: true }, true, false, 0, 120), false);
 });
 
 test('V5.1 uses one five-slice rim-led envelope for every visual theme', () => {

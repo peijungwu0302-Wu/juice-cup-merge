@@ -35,7 +35,13 @@ import {
   speedToWorld,
   themeFor,
 } from './game/config';
-import { normalizeSettings, powerFromGesture, selectControlledLevel } from './game/core';
+import {
+  SIMPLE_RELEASE_CANCEL_PX,
+  normalizeSettings,
+  powerFromGesture,
+  selectControlledLevel,
+  shouldSimpleReleaseLaunch,
+} from './game/core';
 
 const GameScene = lazy(() => import('./game/GameScene').then((module) => ({ default: module.GameScene })));
 
@@ -58,9 +64,12 @@ type Gesture = {
   mode: GestureMode;
   originX: number;
   originY: number;
+  startedAt: number;
   lastX: number;
   lastY: number;
   positionLocked: boolean;
+  releaseArmed: boolean;
+  cancelled: boolean;
   samples: Array<{ y: number; t: number }>;
 };
 
@@ -70,9 +79,12 @@ const EMPTY_GESTURE: Gesture = {
   mode: 'direct',
   originX: 0,
   originY: 0,
+  startedAt: 0,
   lastX: 0,
   lastY: 0,
   positionLocked: false,
+  releaseArmed: false,
+  cancelled: false,
   samples: [],
 };
 
@@ -618,11 +630,12 @@ export default function Home() {
     const handleZ = SPAWN_Z - Math.cos(currentAim.angle) * handleDistance;
     const handlePoint = projectToScreen(new THREE.Vector3(currentAim.x + Math.sin(currentAim.angle) * handleDistance,
       laneSurfaceY(handleZ, active.slope) + 0.12, handleZ), rect);
+    const nearCup = Math.hypot(x - cupPoint.x, y - cupPoint.y) < 76;
+    const simpleRelease = active.simpleReleaseLaunch && !active.angle && !active.power;
 
     if (phase === 'down') {
       let mode: GestureMode = 'direct';
       if (active.angle) {
-        const nearCup = Math.hypot(x - cupPoint.x, y - cupPoint.y) < 70;
         const vx = handlePoint.x - lineBase.x;
         const vy = handlePoint.y - lineBase.y;
         const lengthSquared = Math.max(1, vx * vx + vy * vy);
@@ -634,8 +647,11 @@ export default function Home() {
         else mode = 'throw';
       }
       gestureRef.current = { active: true, pointerId: event.pointerId, mode, originX: x, originY: y,
+        startedAt: now,
         lastX: x, lastY: y,
         positionLocked: mode === 'direct' && active.straightStabilizer && active.straightLockDistance <= 0,
+        releaseArmed: simpleRelease && (nearCup || y >= rect.height * 0.62),
+        cancelled: false,
         samples: [{ y, t: now }] };
       if (mode === 'direct') commitAim({ x: screenToLaunchX(x, rect), angle: 0, locked: false });
       if (mode === 'aim') commitAim({ ...currentAim, locked: false });
@@ -656,6 +672,10 @@ export default function Home() {
       gesture.samples = gesture.samples.filter((sample) => now - sample.t < 160);
       const upward = gesture.originY - y;
       const horizontal = x - gesture.originX;
+      if (simpleRelease) {
+        if (Math.abs(horizontal) >= 3) gesture.releaseArmed = true;
+        if (y - gesture.originY >= SIMPLE_RELEASE_CANCEL_PX) gesture.cancelled = true;
+      }
       if (gesture.mode === 'position-or-throw') {
         if (currentAim.locked && upward > 12 && upward > Math.abs(horizontal) * 1.12) gesture.mode = 'throw';
         else if (Math.abs(horizontal) > 4) gesture.mode = 'position';
@@ -668,6 +688,10 @@ export default function Home() {
         const angle = clamp(Math.atan2(x - base.x, Math.max(5, base.y - y)), -maximum, maximum);
         commitAim((previous) => ({ ...previous, angle, locked: false }));
       } else if (gesture.mode === 'direct') {
+        if (simpleRelease && gesture.cancelled) {
+          setPowerPreview(0);
+          return;
+        }
         if (!active.straightStabilizer || !gesture.positionLocked) {
           commitAim({ x: screenToLaunchX(x, rect), angle: 0, locked: false });
           if (active.straightStabilizer && upward >= active.straightLockDistance) gesture.positionLocked = true;
@@ -677,7 +701,7 @@ export default function Home() {
           const low = Math.min(active.minPower, active.maxPower);
           const high = Math.max(active.minPower, active.maxPower);
           setPowerPreview(clamp((power - low) / Math.max(0.1, high - low), 0, 1));
-        } else setPowerPreview(clamp(upward / active.throwThreshold, 0, 1));
+        } else if (!simpleRelease) setPowerPreview(clamp(upward / active.throwThreshold, 0, 1));
       } else if (gesture.mode === 'throw') {
         const power = powerFromGesture(gesture.originY, y, gesture.samples, now, active);
         const low = Math.min(active.minPower, active.maxPower);
@@ -689,6 +713,12 @@ export default function Home() {
 
     gesture.active = false;
     const forward = gesture.originY - y;
+    if (simpleRelease && gesture.mode === 'direct') {
+      const pressedFor = now - gesture.startedAt;
+      if (shouldSimpleReleaseLaunch(active, gesture.releaseArmed, gesture.cancelled, y - gesture.originY, pressedFor)) fire(active.fixedSpeed);
+      else setPowerPreview(0);
+      return;
+    }
     if (gesture.mode === 'aim') {
       commitAim((previous) => ({ ...previous, locked: true }));
       setPowerPreview(0);
@@ -796,9 +826,9 @@ export default function Home() {
     reset(settingsRef.current);
   }, [reset]);
 
-  const visualModeLabel = settings.visualMode === 'art' ? '美術 5.4' : settings.visualMode === 'realtime3d' ? '即時 3D' : '陽春';
+  const visualModeLabel = settings.visualMode === 'art' ? '美術 5.5' : settings.visualMode === 'realtime3d' ? '即時 3D' : '陽春';
 
-  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.4">
+  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.5">
     <header className="hud">
       <div className="score-main hud-tile"><small>分數</small><strong>{score.toLocaleString()}</strong><em>最高 {best.toLocaleString()}・零復活 {bestClean.toLocaleString()}</em></div>
       <div className="orders hud-tile"><small>訂單</small><b>{orders}</b><em>累積 {lifetimeOrders}</em></div>
@@ -875,6 +905,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Toggle title="動態防手抖" note="直線模式達到距離後，隱形固定發射起點" value={settings.straightStabilizer} onChange={(value) => patch({ straightStabilizer: value })}/>
         {settings.straightStabilizer && <Slider title="防手抖觸發距離" value={settings.straightLockDistance} min={0} max={40} step={1} unit="px" onChange={(value) => patch({ straightLockDistance: value })}/>}
         <Toggle title="力度控制" note="滑動距離 70%＋末段速度 30%，角度不受出手微操影響" value={settings.power} onChange={(value) => patch({ power: value })}/>
+        {!settings.angle && !settings.power && <Toggle title="簡易放手發射" note="左右定位後放手直射；向下拖曳可取消" value={settings.simpleReleaseLaunch} onChange={(value) => patch({ simpleReleaseLaunch: value })}/>}
         <Toggle title="顯示杯子等級" note="在杯身顯示 1～7" value={settings.levels} onChange={(value) => patch({ levels: value })}/>
         <Toggle title="杯口辨識光環" note="協助辨認被前排遮住的杯子，可自由關閉" value={settings.occlusionCues} onChange={(value) => patch({ occlusionCues: value })}/>
         <Toggle title="顯示反彈路徑" note="以跑道尺寸、斜坡與反彈參數預測" value={settings.bounces} onChange={(value) => patch({ bounces: value })}/>
@@ -886,7 +917,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(value) => patch({ throwThreshold: value })}/>
       </div>
       <details className="developer"><summary>開發者專區 <span>即時調整 V5 物理手感</span></summary>
-        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.4 預設</button></div>
+        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.5 預設</button></div>
         <Toggle title="顯示碰撞骨架" note="將杯身、護欄、跑道與前牆疊在美術畫面上檢查對位" value={settings.debugHitboxes} onChange={(value) => patch({ debugHitboxes: value })}/>
         <Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(value) => patch({ maxAngle: value })}/>
         <Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(value) => patch({ fixedSpeed: value })}/>
@@ -909,7 +940,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="危險線深入比例" value={settings.dangerPenetration} min={0.1} max={0.8} step={0.02} onChange={(value) => patch({ dangerPenetration: value })}/>
         <Slider title="高速回收門檻" value={settings.returnSpeed} min={0.2} max={4} step={0.1} onChange={(value) => patch({ returnSpeed: value })}/>
         {settings.visualMode === 'art'
-          ? <p className="art-camera-note">精緻模式使用單一校正跑道與固定攝影機；碰撞骨架只會在開發者檢查時顯示。</p>
+          ? <p className="art-camera-note">精緻模式使用 V5.5 接地校正與固定攝影機；碰撞骨架只會在開發者檢查時顯示。</p>
           : (
             <Slider title="攝影機高度" value={settings.cameraHeight} min={9.5} max={16} step={0.1} onChange={(value) => patch({ cameraHeight: value })}/>
           )}

@@ -24,6 +24,9 @@ const THEMES: Theme[] = ['premiumJuice', 'simpleJuice', 'premiumSundae', 'simple
 const QUALITIES: GraphicsQuality[] = ['eco', 'balanced', 'cinematic'];
 const VISUAL_MODES: VisualMode[] = ['art', 'realtime3d', 'simple'];
 
+export const SIMPLE_RELEASE_MIN_MS = 50;
+export const SIMPLE_RELEASE_CANCEL_PX = 36;
+
 const bounded = (value: unknown, fallback: number, minimum: number, maximum: number) => {
   if (value === null || value === '') return clamp(fallback, minimum, maximum);
   const parsed = Number(value);
@@ -50,6 +53,7 @@ export function normalizeSettings(stored: Partial<Settings> | null): Settings {
     bounces: booleanOr(merged.bounces, DEFAULTS.bounces),
     sound: booleanOr(merged.sound, DEFAULTS.sound),
     vibration: booleanOr(merged.vibration, DEFAULTS.vibration),
+    simpleReleaseLaunch: booleanOr(merged.simpleReleaseLaunch, DEFAULTS.simpleReleaseLaunch),
     straightStabilizer: booleanOr(merged.straightStabilizer, DEFAULTS.straightStabilizer),
     debugHitboxes: booleanOr(merged.debugHitboxes, DEFAULTS.debugHitboxes),
     theme: THEMES.includes(merged.theme) ? merged.theme : DEFAULTS.theme,
@@ -90,6 +94,18 @@ export function normalizeSettings(stored: Partial<Settings> | null): Settings {
 }
 
 export type GestureSample = { y: number; t: number };
+
+export function shouldSimpleReleaseLaunch(
+  settings: Pick<Settings, 'simpleReleaseLaunch' | 'angle' | 'power'>,
+  armed: boolean,
+  cancelled: boolean,
+  downwardPixels: number,
+  pressedMs: number,
+) {
+  return settings.simpleReleaseLaunch && !settings.angle && !settings.power
+    && armed && !cancelled && downwardPixels < SIMPLE_RELEASE_CANCEL_PX
+    && pressedMs >= SIMPLE_RELEASE_MIN_MS;
+}
 
 export function selectControlledLevel(
   baseLevel: number,

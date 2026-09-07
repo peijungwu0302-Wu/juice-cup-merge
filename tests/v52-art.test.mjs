@@ -8,11 +8,13 @@ const asset = (path) => new URL(path, root);
 const spec = JSON.parse(readFileSync(asset('app/game/v52-art-spec.json'), 'utf8'));
 const laneSpec = JSON.parse(readFileSync(asset('app/game/v51-asset-spec.json'), 'utf8')).lane;
 
-test('V5.4 retains 21 isolated, transparent, mobile-budgeted art sprites', () => {
+test('V5.5 retains 21 isolated, transparent, mobile-budgeted art sprites with per-cup foot anchors', () => {
   let total = 0;
   for (const kind of ['juice', 'sundae', 'wine']) {
     assert.equal(spec.sprite.themes[kind].bounds.length, 7);
     assert.equal(spec.sprite.themes[kind].bodyRatios.length, 7);
+    assert.equal(spec.sprite.themes[kind].footInsets.length, 7);
+    assert.equal(spec.sprite.themes[kind].footShadowRatios.length, 7);
     for (let level = 1; level <= 7; level += 1) {
       const path = asset(`public/art-v52/${kind}-${level}.png`);
       const contents = readFileSync(path);
@@ -24,7 +26,7 @@ test('V5.4 retains 21 isolated, transparent, mobile-budgeted art sprites', () =>
     }
   }
   assert.ok(total < 3_800_000, `art sprites total ${total} bytes`);
-  assert.equal(spec.version, '5.4.0');
+  assert.equal(spec.version, '5.5.0');
 });
 
 const artCamera = (aspect) => {
@@ -81,6 +83,15 @@ test('art mode uses one seamless background and no runtime rail overlay', () => 
   assert.doesNotMatch(scene, /ArtLaneFrame/);
   assert.equal(styles.match(/lane-premium-v54\.png/g)?.length, 1);
   assert.match(styles, /background-size: 100% 100%/);
+});
+
+test('art cups stand on a vertical yaw-only plane with two ground-contact shadows', () => {
+  const model = readFileSync(asset('app/game/CupModel.tsx'), 'utf8');
+  assert.match(model, /<Billboard follow lockX lockZ>/);
+  assert.match(model, /spriteCenterY/);
+  assert.match(model, /getArtShadowTexture\('contact'\)/);
+  assert.match(model, /getArtShadowTexture\('ambient'\)/);
+  assert.match(model, /footInsets/);
 });
 
 test('the art lane and all sprite sources retain their canonical dimensions', () => {

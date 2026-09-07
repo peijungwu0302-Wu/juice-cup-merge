@@ -1,6 +1,6 @@
 'use client';
 
-import { useGLTF, useTexture } from '@react-three/drei';
+import { Billboard, useGLTF, useTexture } from '@react-three/drei';
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import {
@@ -15,6 +15,7 @@ import {
   artSpritePath,
   isPremiumTheme,
   kindForTheme,
+  laneAngle,
 } from './config';
 
 type CupNodes = Record<string, THREE.Mesh>;
@@ -58,23 +59,25 @@ function glassMaterial(premium: boolean, quality: GraphicsQuality) {
 }
 
 const levelTextures = new Map<number, THREE.CanvasTexture>();
-let artShadowTexture: THREE.CanvasTexture | null = null;
+const artShadowTextures = new Map<'contact' | 'ambient', THREE.CanvasTexture>();
 
-function getArtShadowTexture() {
-  if (artShadowTexture) return artShadowTexture;
+function getArtShadowTexture(kind: 'contact' | 'ambient') {
+  const cached = artShadowTextures.get(kind);
+  if (cached) return cached;
   const canvas = document.createElement('canvas');
   canvas.width = 128;
   canvas.height = 64;
   const context = canvas.getContext('2d')!;
-  const gradient = context.createRadialGradient(64, 32, 5, 64, 32, 58);
-  gradient.addColorStop(0, 'rgba(58, 28, 12, .62)');
-  gradient.addColorStop(0.48, 'rgba(77, 37, 14, .28)');
+  const gradient = context.createRadialGradient(64, 32, kind === 'contact' ? 2 : 7, 64, 32, 58);
+  gradient.addColorStop(0, kind === 'contact' ? 'rgba(50, 24, 10, .82)' : 'rgba(73, 39, 20, .34)');
+  gradient.addColorStop(0.48, kind === 'contact' ? 'rgba(66, 32, 13, .34)' : 'rgba(91, 51, 25, .15)');
   gradient.addColorStop(1, 'rgba(77, 37, 14, 0)');
   context.fillStyle = gradient;
   context.fillRect(0, 0, 128, 64);
-  artShadowTexture = new THREE.CanvasTexture(canvas);
-  artShadowTexture.colorSpace = THREE.SRGBColorSpace;
-  return artShadowTexture;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  artShadowTextures.set(kind, texture);
+  return texture;
 }
 
 function getLevelTexture(level: number) {
@@ -116,12 +119,14 @@ function ArtCup({
   level,
   radius,
   height,
+  slope,
   preview,
 }: {
   theme: Theme;
   level: number;
   radius: number;
   height: number;
+  slope: number;
   preview: boolean;
 }) {
   const sourceTexture = useTexture(artSpritePath(theme, level));
@@ -134,7 +139,8 @@ function ArtCup({
     configured.needsUpdate = true;
     return configured;
   }, [sourceTexture]);
-  const shadow = useMemo(() => getArtShadowTexture(), []);
+  const contactShadow = useMemo(() => getArtShadowTexture('contact'), []);
+  const ambientShadow = useMemo(() => getArtShadowTexture('ambient'), []);
   const kind = kindForTheme(theme);
   const profile = ART_ASSET.sprite.themes[kind];
   const image = texture.image as { width: number; height: number };
@@ -142,6 +148,8 @@ function ArtCup({
   const contentWidth = Math.max(1, image.width - padding * 2);
   const contentHeight = Math.max(1, image.height - padding * 2);
   const bodyRatio = profile.bodyRatios[level] ?? profile.bodyRatios[0];
+  const footInset = profile.footInsets[level] ?? padding;
+  const footShadowRatio = profile.footShadowRatios[level] ?? 0.86;
   const contentWorldWidth = radius * 2 / bodyRatio;
   const contentWorldHeight = Math.min(
     contentWorldWidth * contentHeight / contentWidth,
@@ -149,18 +157,29 @@ function ArtCup({
   );
   const spriteWidth = contentWorldWidth * image.width / contentWidth;
   const spriteHeight = contentWorldHeight * image.height / contentHeight;
-  const bottomPaddingWorld = spriteHeight * padding / image.height;
+  const bottomPaddingWorld = spriteHeight * footInset / image.height;
+  const spriteCenterY = spriteHeight / 2 - bottomPaddingWorld;
+  const groundRotation: [number, number, number] = [-Math.PI / 2 - laneAngle(slope), 0, 0];
 
   useEffect(() => () => texture.dispose(), [texture]);
 
   return <group>
-    {!preview && <mesh position={[0, 0.018, radius * 0.22]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
-      <planeGeometry args={[radius * 3.2, radius * 1.28]}/>
-      <meshBasicMaterial map={shadow} transparent opacity={0.62} depthWrite={false} toneMapped={false}/>
-    </mesh>}
-    <sprite position={[0, -bottomPaddingWorld, 0]} scale={[spriteWidth, spriteHeight, 1]} center={[0.5, 0]} renderOrder={6}>
-      <spriteMaterial map={texture} transparent alphaTest={0.018} depthWrite depthTest toneMapped={false}/>
-    </sprite>
+    {!preview && <>
+      <mesh position={[0, -0.026, radius * 0.04]} rotation={groundRotation} renderOrder={1}>
+        <planeGeometry args={[radius * 1.9 * footShadowRatio, radius * 0.48]}/>
+        <meshBasicMaterial map={contactShadow} transparent opacity={0.72} depthWrite={false} toneMapped={false}/>
+      </mesh>
+      <mesh position={[radius * 0.12, -0.028, radius * 0.34]} rotation={groundRotation} renderOrder={1}>
+        <planeGeometry args={[radius * 2.45, radius * 0.92]}/>
+        <meshBasicMaterial map={ambientShadow} transparent opacity={0.2} depthWrite={false} toneMapped={false}/>
+      </mesh>
+    </>}
+    <Billboard follow lockX lockZ>
+      <mesh position={[0, spriteCenterY, 0]} renderOrder={6}>
+        <planeGeometry args={[spriteWidth, spriteHeight]}/>
+        <meshBasicMaterial map={texture} transparent alphaTest={0.018} depthWrite depthTest toneMapped={false} side={THREE.DoubleSide}/>
+      </mesh>
+    </Billboard>
   </group>;
 }
 
@@ -253,6 +272,7 @@ export function CupModel3D({
   showHalo,
   quality,
   visualMode,
+  slope = 0,
   microDetails = true,
   preview = false,
 }: {
@@ -264,6 +284,7 @@ export function CupModel3D({
   showHalo: boolean;
   quality: GraphicsQuality;
   visualMode: VisualMode;
+  slope?: number;
   microDetails?: boolean;
   preview?: boolean;
 }) {
@@ -271,7 +292,7 @@ export function CupModel3D({
   const premium = isPremiumTheme(theme);
   return <group>
     {visualMode === 'art'
-      ? <ArtCup theme={theme} level={level} radius={radius} height={height} preview={preview}/>
+      ? <ArtCup theme={theme} level={level} radius={radius} height={height} slope={slope} preview={preview}/>
       : visualMode === 'realtime3d' && premium
         ? <PremiumCup kind={kind} level={level} radius={radius} height={height} quality={quality} microDetails={microDetails} preview={preview}/>
         : <SimpleCup theme={theme} level={level} radius={radius} height={height} quality={quality} preview={preview}/>
