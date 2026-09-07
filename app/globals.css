@@ -284,6 +284,24 @@ button { -webkit-tap-highlight-color: transparent; }
   animation: spin .8s linear infinite;
 }
 
+.scene-error {
+  position: absolute;
+  inset: 0;
+  z-index: 13;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  padding: 28px;
+  background: linear-gradient(150deg, #6d3d28, #c98d59);
+  color: #fff9e9;
+  text-align: center;
+}
+
+.scene-error b { font-size: 14px; }
+.scene-error small { max-width: 250px; color: #ffe9d0; font-size: 9px; line-height: 1.5; }
+.scene-error button { margin-top: 5px; padding: 9px 15px; border: 1px solid #fff9; border-radius: 18px; background: #fff7e9; color: #7a4129; font-size: 9px; font-weight: 900; }
+
 .field-badges {
   position: absolute;
   top: 8px;

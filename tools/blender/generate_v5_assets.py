@@ -65,7 +65,8 @@ def lathe(name: str, profile: list[tuple[float, float]], segments=72):
     for segment in range(segments):
         angle = math.tau * segment / segments
         cosine, sine = math.cos(angle), math.sin(angle)
-        vertices.extend((radius * cosine, y, radius * sine) for radius, y in profile)
+        # Blender is Z-up; the glTF exporter converts this to Three.js Y-up.
+        vertices.extend((radius * cosine, radius * sine, height) for radius, height in profile)
     count = len(profile)
     for segment in range(segments):
         next_segment = (segment + 1) % segments
@@ -87,10 +88,14 @@ def lathe(name: str, profile: list[tuple[float, float]], segments=72):
 
 
 def beveled_box(name: str, location, dimensions, bevel: float, mat):
-    bpy.ops.mesh.primitive_cube_add(location=location)
+    # Callers use Three.js coordinates (X width, Y height, Z lane depth).
+    # Blender uses Z as up and exports Blender +Y as glTF -Z.
+    three_x, three_y, three_z = location
+    width, height, depth = dimensions
+    bpy.ops.mesh.primitive_cube_add(location=(three_x, -three_z, three_y))
     obj = bpy.context.object
     obj.name = name
-    obj.dimensions = dimensions
+    obj.dimensions = (width, depth, height)
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     modifier = obj.modifiers.new("SoftEdges", "BEVEL")
     modifier.width = bevel
@@ -188,4 +193,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

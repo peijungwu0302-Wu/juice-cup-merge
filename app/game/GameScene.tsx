@@ -425,6 +425,10 @@ function PhysicsMonitor({
       const speed = Math.hypot(velocity.x, velocity.z);
       const contacts = contactsRef.current.get(cup.id)?.size ?? 0;
       if (position.z + radius < dangerLine - 0.08) cup.safeExited = true;
+      if (!body.isSleeping() && contacts > 0 && speed < settings.bounceCutoff) {
+        const settle = Math.pow(0.84, delta * 60);
+        body.setLinvel({ x: velocity.x * settle, y: velocity.y * 0.72, z: velocity.z * settle }, false);
+      }
       if (contacts > 0 && speed < settings.sleepSpeed) cup.sleepMs += deltaMs;
       else cup.sleepMs = Math.max(0, cup.sleepMs - deltaMs * 2);
       if (!body.isSleeping() && cup.sleepMs >= settings.sleepDelayMs) body.sleep();
@@ -436,7 +440,7 @@ function PhysicsMonitor({
       else cup.dangerMs = Math.max(0, cup.dangerMs - deltaMs * 3);
       if (cup.dangerMs >= settings.gameOverMs) shouldEnd = true;
 
-      const escaped = position.z > LANE_NEAR + 0.65 || position.y < -2.5;
+      const escaped = (position.z > LANE_NEAR + 0.65 && speed > settings.returnSpeed) || position.y < -2.5;
       if (escaped && cup.ageMs > 300 && !recycleGuard.current.has(cup.id)) {
         recycleGuard.current.add(cup.id);
         onRecycle(cup.id);

@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/immutability, react-hooks/set-state-in-effect -- the real-time physics bridge intentionally synchronizes mutable Rapier state through refs. */
 
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Component, ErrorInfo, lazy, ReactNode, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { CupIcon } from './game/CupIcon';
 import type { BodyMap, ContactMap } from './game/GameScene';
@@ -35,6 +35,18 @@ import {
 import { powerFromGesture, validateLevelSizes } from './game/core';
 
 const GameScene = lazy(() => import('./game/GameScene').then((module) => ({ default: module.GameScene })));
+
+class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('V5 3D scene failed to initialize', error, info.componentStack);
+  }
+  render() {
+    if (this.state.failed) return <div className="scene-error"><b>3D 場景暫時無法載入</b><small>請確認網路後重新整理，線上紀錄不會受影響。</small><button onClick={() => location.reload()}>重新載入</button></div>;
+    return this.props.children;
+  }
+}
 
 type GestureMode = 'direct' | 'position-or-throw' | 'position' | 'aim' | 'throw';
 type Gesture = {
@@ -747,11 +759,11 @@ export default function Home() {
     </header>
     <div className="playfield" onPointerDown={(event) => pointer(event, 'down')} onPointerMove={(event) => pointer(event, 'move')}
       onPointerUp={(event) => pointer(event, 'up')} onPointerCancel={(event) => pointer(event, 'cancel')}>
-      {mounted && <Suspense fallback={null}><GameScene cups={cups} cupsRef={cupsRef} bodyMapRef={bodyMapRef} contactsRef={contactsRef}
+      {mounted && <SceneBoundary><Suspense fallback={null}><GameScene cups={cups} cupsRef={cupsRef} bodyMapRef={bodyMapRef} contactsRef={contactsRef}
         settings={settings} paused={paused} gameOver={gameOver} aim={aim} nextLevel={queue[0] ?? 0}
         dangerLine={dangerLine} bursts={bursts} restoreEpoch={restoreEpoch} safeUntilRef={safeUntilRef}
         onCamera={(camera) => { cameraRef.current = camera; }} onCupCollision={handleCupCollision}
-        onGameOver={handleGameOver} onRecycle={handleRecycle} onReady={() => setSceneReady(true)}/></Suspense>}
+        onGameOver={handleGameOver} onRecycle={handleRecycle} onReady={() => setSceneReady(true)}/></Suspense></SceneBoundary>}
       {!sceneReady && <div className="scene-loading"><span/><b>正在準備 3D 跑道</b></div>}
       <div className="field-badges">
         {historyCount > 0 && <button onClick={undo} aria-label={`復原上一步，尚有 ${historyCount} 次`}>↶ <small>{historyCount}</small></button>}

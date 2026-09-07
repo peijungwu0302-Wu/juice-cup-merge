@@ -18,7 +18,7 @@ function MiniGarnish({ level, kind }: { level: number; kind: ReturnType<typeof k
     return <>
       <path d="M29 29c3-8 13-8 16 0 5 1 7 8 3 11H26c-4-4-1-10 3-11Z" fill="#fff8e5" stroke="#c79c77" strokeWidth="1.2"/>
       {level === 3 && <rect x="39" y="18" width="8" height="17" rx="2" transform="rotate(19 39 18)" fill="#4a261c"/>}
-      {level !== 3 && <circle cx="37" cy="20" r="5" fill={level >= 5 ? '#d7264c' : level === 2 ? '#6d2b26' : '#e68738'}/>} 
+      {level !== 3 && <circle cx="37" cy="20" r="5" fill={level >= 5 ? '#d7264c' : level === 2 ? '#6d2b26' : '#e68738'}/>}
     </>;
   }
   if (level === 5 && kind === 'juice') return <path d="M38 19 57 31 34 36Z" fill="#ef465b" stroke="#318348" strokeWidth="3"/>;

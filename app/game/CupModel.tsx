@@ -108,9 +108,9 @@ function Watermelon({ position = [0.48, 2.02, 0] as [number, number, number] }) 
   </group>;
 }
 
-function SundaeTop({ level, color }: { level: number; color: string }) {
+function SundaeTop({ level, color, premium }: { level: number; color: string; premium: boolean }) {
   return <group position={[0, 1.84, 0]}>
-    <mesh castShadow scale={[0.76, 0.45, 0.76]}><sphereGeometry args={[1, 24, 16]}/><LiquidMaterial color={color} premium/></mesh>
+    <mesh castShadow scale={[0.76, 0.45, 0.76]}><sphereGeometry args={[1, 24, 16]}/><LiquidMaterial color={color} premium={premium}/></mesh>
     <mesh position={[0, 0.35, 0]} castShadow scale={[0.53, 0.32, 0.53]}><sphereGeometry args={[1, 20, 14]}/><meshPhysicalMaterial color="#fff8e7" roughness={0.24} clearcoat={0.28}/></mesh>
     {level === 0 && <mesh position={[0.18, 0.6, 0]} rotation={[0.2, 0, -0.35]} castShadow><boxGeometry args={[0.28, 0.38, 0.08]}/><meshStandardMaterial color="#f4cc77" roughness={0.65}/></mesh>}
     {level === 1 && <Citrus color="#e48b2f" position={[0.42, 0.42, 0]}/>}
@@ -119,6 +119,19 @@ function SundaeTop({ level, color }: { level: number; color: string }) {
     {level === 4 && <BerryCluster color="#5146ab" position={[0.04, 0.57, 0]} count={5}/>}
     {level === 5 && <BerryCluster color="#b71735" position={[0, 0.58, 0]} count={3}/>}
     {level === 6 && <><BerryCluster color="#e22854" position={[0, 0.58, 0]} count={3}/><mesh position={[0, 0.78, 0]} rotation={[0, 0, Math.PI / 4]} castShadow><torusGeometry args={[0.18, 0.045, 8, 4]}/><meshStandardMaterial color="#f7c43e" metalness={0.65} roughness={0.22}/></mesh></>}
+  </group>;
+}
+
+function JuiceLiquid({ level, color, premium }: { level: number; color: string; premium: boolean }) {
+  if (level !== 6) return <mesh position={[0, 1.08, 0]} castShadow receiveShadow>
+    <cylinderGeometry args={[0.82, 0.6, 1.68, 32]}/><LiquidMaterial color={color} premium={premium}/>
+  </mesh>;
+  const rainbow = ['#7a4acb', '#2aa8df', '#43bd70', '#f1d33c', '#ff8c2a', '#ef405f'];
+  return <group>
+    {rainbow.map((layer, index) => <mesh key={layer} position={[0, 0.37 + index * 0.275, 0]} castShadow>
+      <cylinderGeometry args={[0.64 + index * 0.031, 0.61 + index * 0.031, 0.29, 32]}/>
+      <LiquidMaterial color={layer} premium={premium} emissive={index === rainbow.length - 1}/>
+    </mesh>)}
   </group>;
 }
 
@@ -222,10 +235,8 @@ export function CupModel3D({
   const scale: [number, number, number] = [radius / info.radius, height / info.height, radius / info.radius];
 
   return <group scale={scale} renderOrder={preview ? 4 : 1}>
-    {kind === 'juice' && <mesh position={[0, 1.08, 0]} castShadow={!preview} receiveShadow>
-      <cylinderGeometry args={[0.82, 0.6, 1.68, 32]}/><LiquidMaterial color={color} premium={premium} emissive={level === 6}/>
-    </mesh>}
-    {kind === 'sundae' && <SundaeTop level={level} color={color}/>} 
+    {kind === 'juice' && <JuiceLiquid level={level} color={color} premium={premium}/>}
+    {kind === 'sundae' && <SundaeTop level={level} color={color} premium={premium}/>}
     {kind === 'wine' && <mesh position={[0, 1.48, 0]} scale={[0.92, 0.58, 0.92]} castShadow={!preview}>
       <sphereGeometry args={[0.82, 28, 18]}/><LiquidMaterial color={color} premium={premium} emissive={level >= 5}/>
     </mesh>}
@@ -233,12 +244,12 @@ export function CupModel3D({
     {shell && <mesh geometry={shell.geometry} castShadow={!preview} receiveShadow>
       <GlassMaterial premium={premium}/>
     </mesh>}
-    {kind === 'juice' && <JuiceDetails level={level} premium={premium}/>} 
-    {kind === 'wine' && <WineDetails level={level} premium={premium}/>} 
+    {kind === 'juice' && <JuiceDetails level={level} premium={premium}/>}
+    {kind === 'wine' && <WineDetails level={level} premium={premium}/>}
     {showHalo && <mesh position={[0, info.height + 0.08, 0]} rotation={[Math.PI / 2, 0, 0]} renderOrder={6}>
       <torusGeometry args={[0.8, 0.035, 8, 38]}/>
       <meshBasicMaterial color={LEVELS[level].accent} transparent opacity={preview ? 0.42 : 0.28} depthWrite={false}/>
     </mesh>}
-    {showLevel && <LevelBadge level={level} height={info.height}/>} 
+    {showLevel && <LevelBadge level={level} height={info.height}/>}
   </group>;
 }
