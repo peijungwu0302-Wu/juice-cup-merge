@@ -1,10 +1,10 @@
 @import 'tailwindcss';
 
 :root {
-  --ink: #502d1b;
+  --ink: #4d2918;
   --cream: #fff9e9;
-  --orange: #e56b2f;
-  --edge: #d9ad72;
+  --orange: #e8682e;
+  --edge: #d5a561;
 }
 
 * { box-sizing: border-box; }
@@ -15,7 +15,7 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #e9c887;
+  background: #dcb873;
   color: var(--ink);
   font-family: Arial, "Noto Sans TC", sans-serif;
 }
@@ -32,9 +32,9 @@ button { -webkit-tap-highlight-color: transparent; }
   height: 100dvh;
   padding: max(3px, env(safe-area-inset-top)) 4px max(3px, env(safe-area-inset-bottom));
   background:
-    radial-gradient(circle at 10% -8%, #fff8d9 0 8%, transparent 34%),
-    radial-gradient(circle at 92% 104%, #be7845 0, transparent 34%),
-    linear-gradient(145deg, #f6e1ac, #dba867);
+    radial-gradient(circle at 10% -8%, #fffbe3 0 8%, transparent 34%),
+    radial-gradient(circle at 92% 104%, #a55e35 0, transparent 34%),
+    linear-gradient(145deg, #f8e5b3, #cd9257);
 }
 
 .game-card {
@@ -44,10 +44,10 @@ button { -webkit-tap-highlight-color: transparent; }
   width: min(100%, 440px);
   height: 100%;
   overflow: hidden;
-  border: 1px solid #fff9;
+  border: 1px solid #fffbd0;
   border-radius: 21px;
   background: #fff7e5;
-  box-shadow: 0 16px 50px #4c2a1745;
+  box-shadow: 0 18px 55px #41200e5c, inset 0 0 0 1px #d59f5b88;
 }
 
 .hud {
@@ -164,6 +164,16 @@ button { -webkit-tap-highlight-color: transparent; }
   cursor: pointer;
 }
 
+.settings-button span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 30%, #fff, #f0ca8e 60%, #b8783e);
+  filter: drop-shadow(0 2px 2px #6c3a2445);
+}
+
 .settings-button:active { transform: translateY(2px); box-shadow: inset 0 1px 4px #7e4a2b33; }
 
 .sprite-icon {
@@ -175,8 +185,17 @@ button { -webkit-tap-highlight-color: transparent; }
   filter: drop-shadow(0 2px 2px #4b271c40);
 }
 
+.cup-icon {
+  display: block;
+  width: 31px;
+  height: 42px;
+  overflow: visible;
+  filter: drop-shadow(0 2px 2px #4b271c40);
+}
+
 .cup-preview.lucky .sprite-icon,
-.cup-preview.lucky .simple-icon {
+.cup-preview.lucky .simple-icon,
+.cup-preview.lucky .cup-icon {
   filter: drop-shadow(0 0 3px #ffd454cc) drop-shadow(0 2px 2px #6b371c55);
 }
 
@@ -189,6 +208,12 @@ button { -webkit-tap-highlight-color: transparent; }
   width: 25px;
   height: 34px;
   opacity: .86;
+}
+
+.queue .cup-preview:last-child .cup-icon {
+  width: 27px;
+  height: 37px;
+  opacity: .88;
 }
 
 .simple-icon {
@@ -216,8 +241,10 @@ button { -webkit-tap-highlight-color: transparent; }
   border: 1px solid #9d6238;
   border-top: 0;
   border-radius: 0 0 14px 14px;
-  background: #e8c78c;
+  isolation: isolate;
+  background: linear-gradient(#a9673c, #efc881 46%, #d39655);
   box-shadow: inset 0 0 0 2px #fff7;
+  touch-action: none;
 }
 
 .playfield canvas {
@@ -228,6 +255,35 @@ button { -webkit-tap-highlight-color: transparent; }
   user-select: none;
 }
 
+.v5-canvas {
+  position: absolute !important;
+  inset: 0;
+  z-index: 0;
+}
+
+.scene-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  background: linear-gradient(155deg, #8e5435, #f0c77e 55%, #b36d3a);
+  color: #fffdf1;
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.scene-loading span {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #fff5;
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+
 .field-badges {
   position: absolute;
   top: 8px;
@@ -235,6 +291,7 @@ button { -webkit-tap-highlight-color: transparent; }
   display: flex;
   align-items: center;
   gap: 4px;
+  z-index: 5;
   pointer-events: none;
 }
 
@@ -262,6 +319,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .field-badges .danger-mode { color: #b94e2d; }
+.field-badges .physics-mode { color: #287c62; letter-spacing: .05em; }
 
 .aim-state {
   position: absolute;
@@ -281,6 +339,7 @@ button { -webkit-tap-highlight-color: transparent; }
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+  z-index: 6;
 }
 
 .aim-state.locked { background: #25835fe8; }
@@ -296,6 +355,7 @@ button { -webkit-tap-highlight-color: transparent; }
   background: #50351f4d;
   box-shadow: 0 2px 8px #0003;
   pointer-events: none;
+  z-index: 6;
 }
 
 .power-meter i {
@@ -330,6 +390,7 @@ button { -webkit-tap-highlight-color: transparent; }
   box-shadow: 0 18px 50px #32180f66;
   text-align: center;
   backdrop-filter: blur(8px);
+  z-index: 10;
 }
 
 .pause-panel {
@@ -411,7 +472,8 @@ button { -webkit-tap-highlight-color: transparent; }
   flex: 0 0 62px;
   padding: 5px 4px;
   border-top: 1px solid #e2bd84;
-  background: linear-gradient(#fffaf0, #f6dfb2);
+  background: linear-gradient(#fffdf5, #f1d69d);
+  box-shadow: 0 -4px 12px #4f2c1b20;
 }
 
 .strip-label {
@@ -433,6 +495,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .mini-level .sprite-icon { width: 33px; height: 46px; }
+.mini-level .cup-icon { width: 34px; height: 47px; }
 .mini-level .simple-icon { width: 31px; height: 40px; }
 
 .mini-level > i {
@@ -539,6 +602,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .theme-picker button .sprite-icon { width: 26px; height: 39px; }
 .theme-picker button .simple-icon { width: 25px; height: 32px; }
+.theme-picker button .cup-icon { width: 29px; height: 41px; flex: 0 0 auto; }
 
 .theme-picker button > span:last-child {
   overflow: hidden;
@@ -554,6 +618,28 @@ button { -webkit-tap-highlight-color: transparent; }
   box-shadow: inset 0 0 0 1px #f0a078;
   color: #b64b24;
 }
+
+.quality-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  margin: 0 0 8px;
+}
+
+.quality-picker button {
+  display: grid;
+  gap: 2px;
+  padding: 8px 5px;
+  border: 1px solid #e0c49c;
+  border-radius: 10px;
+  background: #fff;
+  color: #825a43;
+  cursor: pointer;
+}
+
+.quality-picker button b { font-size: 9px; }
+.quality-picker button small { color: #a37c63; font-size: 6.5px; }
+.quality-picker button.active { border-color: #df6b33; background: #fff0e4; color: #b64b24; box-shadow: inset 0 0 0 1px #f0a078; }
 
 .setting-group,
 .developer {
@@ -700,6 +786,8 @@ button { -webkit-tap-highlight-color: transparent; }
   to { transform: none; opacity: 1; }
 }
 
+@keyframes spin { to { transform: rotate(360deg); } }
+
 @media (max-width: 370px) {
   .hud { grid-template-columns: minmax(73px, 1fr) 44px 89px 34px 35px; gap: 3px; padding-inline: 4px; }
   .score-main { padding-inline: 4px; }
@@ -710,6 +798,7 @@ button { -webkit-tap-highlight-color: transparent; }
   .merge-strip { height: 57px; flex-basis: 57px; padding-inline: 2px; }
   .strip-label { width: 30px; flex-basis: 30px; }
   .mini-level .sprite-icon { width: 29px; height: 42px; }
+  .mini-level .cup-icon { width: 29px; height: 42px; }
   .mini-level .simple-icon { width: 27px; height: 36px; }
   .blast-mark { width: 19px; flex-basis: 19px; }
 }

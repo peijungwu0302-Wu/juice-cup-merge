@@ -9,9 +9,11 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .test-build",
+    "test:v5": "esbuild tests/v5-core.test.ts --bundle --platform=node --format=esm --outfile=.test-build/v5-core.test.mjs && node --test .test-build/v5-core.test.mjs && node --test tests/v5-rapier.test.mjs"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "0.19.2",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
     "@react-three/rapier": "^2.2.0",
@@ -28,10 +30,12 @@
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@types/three": "0.185.4",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
+    "esbuild": "0.27.3",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
