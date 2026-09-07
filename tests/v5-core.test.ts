@@ -11,12 +11,24 @@ import {
   cupRadius,
   maxLaunchX,
 } from '../app/game/config';
-import { advanceDynamicDanger, powerFromGesture, predictPath, validateLevelSizes } from '../app/game/core';
+import { advanceDynamicDanger, isStackDanger, normalizeSettings, powerFromGesture, predictPath, selectControlledLevel, validateLevelSizes } from '../app/game/core';
 
 const settings = (patch: Partial<Settings> = {}): Settings => ({
   ...DEFAULTS,
   levelSizes: [...DEFAULT_LEVEL_SIZES],
   ...patch,
+});
+
+test('V5 ships with the approved default presentation and throw values', () => {
+  assert.equal(DEFAULTS.theme, 'premiumJuice');
+  assert.equal(DEFAULTS.dynamicDanger, false);
+  assert.equal(DEFAULTS.straightStabilizer, true);
+  assert.equal(DEFAULTS.straightLockDistance, 3);
+  assert.equal(DEFAULTS.aimLength, 2000);
+  assert.equal(DEFAULTS.fixedSpeed, 9);
+  assert.equal(DEFAULTS.minPower, 10);
+  assert.equal(DEFAULTS.maxPower, 16);
+  assert.equal(DEFAULTS.size, 1);
 });
 
 test('V5 keeps visual and physical sizes independent from the selected theme', () => {
@@ -81,3 +93,44 @@ test('dynamic danger movement and imported size settings are safely clamped', ()
     [1, 1.1, 1.16, 1.4, 1.68, 2, 3.8]);
 });
 
+test('saved settings are migrated without allowing invalid physics values', () => {
+  const migrated = normalizeSettings({
+    theme: 'retired-theme',
+    quality: 'ultra-phone',
+    angle: 'yes',
+    size: Number.NaN,
+    drag: 7,
+    slope: -2,
+    minPower: 20,
+    maxPower: 6,
+    solverIterations: 8.8,
+    ccdSubsteps: 99,
+    levelSizes: [0, 1, 2, 3, 4, 5, 99],
+  } as unknown as Partial<Settings>);
+  assert.equal(migrated.theme, DEFAULTS.theme);
+  assert.equal(migrated.quality, DEFAULTS.quality);
+  assert.equal(migrated.angle, DEFAULTS.angle);
+  assert.equal(migrated.size, DEFAULTS.size);
+  assert.equal(migrated.drag, 0.998);
+  assert.equal(migrated.slope, 0);
+  assert.ok(migrated.maxPower > migrated.minPower);
+  assert.equal(migrated.solverIterations, 9);
+  assert.equal(migrated.ccdSubsteps, 4);
+  assert.deepEqual(migrated.levelSizes, [1, 1, 2, 3, 3.8, 3.8, 3.8]);
+});
+
+test('game over requires a stable cup pile rather than a lone rebound', () => {
+  const returnedCup = { safeExited: true, ageMs: 4000 };
+  assert.equal(isStackDanger(returnedCup, true, true, false), false);
+  assert.equal(isStackDanger(returnedCup, false, true, true), false);
+  assert.equal(isStackDanger(returnedCup, true, false, true), false);
+  assert.equal(isStackDanger(returnedCup, true, true, true), true);
+});
+
+test('rare higher-level cups require progress and enforce a cooldown', () => {
+  assert.deepEqual(selectControlledLevel(0, 6, 4, 0, 0, 0), { level: 0, luckyCooldown: 0 });
+  assert.deepEqual(selectControlledLevel(0, 2, 12, 0, 0, 0.02), { level: 2, luckyCooldown: 10 });
+  assert.deepEqual(selectControlledLevel(1, 3, 28, 1, 0, 0.006), { level: 3, luckyCooldown: 10 });
+  assert.deepEqual(selectControlledLevel(0, 4, 55, 2, 0, 0.001), { level: 4, luckyCooldown: 10 });
+  assert.deepEqual(selectControlledLevel(1, 6, 100, 5, 10, 0), { level: 1, luckyCooldown: 9 });
+});

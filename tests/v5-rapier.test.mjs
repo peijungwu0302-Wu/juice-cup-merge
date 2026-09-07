@@ -82,3 +82,29 @@ test('upright-only rotation prevents tall art from tipping into neighboring cups
   assert.ok(Math.abs(rotation.z) < 1e-4);
   world.free();
 });
+
+test('a crowded lane remains finite, bounded, and settles instead of collectively jittering', () => {
+  const world = buildWorld();
+  const cups = [];
+  for (let row = 0; row < 5; row += 1) {
+    for (let column = 0; column < 5; column += 1) {
+      cups.push(addCup(world, -1.8 + column * 0.9, -8.55 + row * 0.82, {
+        x: (column - 2) * 0.025,
+        y: 0,
+        z: -0.04 * row,
+      }));
+    }
+  }
+  for (let step = 0; step < 1200; step += 1) world.step();
+  let combinedPlanarSpeed = 0;
+  for (const cup of cups) {
+    const position = cup.translation();
+    const velocity = cup.linvel();
+    assert.ok(Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z));
+    assert.ok(Math.abs(position.x) < HALF_WIDTH);
+    assert.ok(position.z > -HALF_LENGTH - 0.4 && position.z < HALF_LENGTH + 0.4);
+    combinedPlanarSpeed += Math.hypot(velocity.x, velocity.z);
+  }
+  assert.ok(combinedPlanarSpeed / cups.length < 0.15, `mean residual speed was ${combinedPlanarSpeed / cups.length}`);
+  world.free();
+});

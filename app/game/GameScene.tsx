@@ -29,7 +29,7 @@ import {
   laneAngle,
   laneSurfaceY,
 } from './config';
-import { PredictionPoint, predictPath } from './core';
+import { PredictionPoint, isStackDanger, predictPath } from './core';
 import { CupModel3D } from './CupModel';
 
 type BodyMap = Map<number, RapierRigidBody>;
@@ -215,6 +215,7 @@ function CupBody({
   bodyMapRef,
   contactsRef,
   onCupCollision,
+  microDetails,
 }: {
   cup: CupState;
   settings: Settings;
@@ -222,13 +223,28 @@ function CupBody({
   bodyMapRef: MutableRefObject<BodyMap>;
   contactsRef: MutableRefObject<ContactMap>;
   onCupCollision: SceneProps['onCupCollision'];
+  microDetails: boolean;
 }) {
   const bodyRef = useRef<RapierRigidBody | null>(null);
+  const contactTokensRef = useRef(new Map<number, number>());
   const radius = cupRadius(cup.level, settings);
   const height = cupHeight(cup.level, settings);
   const contactSkin = Math.min(0.008, settings.contactSlop * 0.004);
 
   const assignBody = useCallback((body: RapierRigidBody | null) => {
+    const previousBody = bodyRef.current;
+    if (!body && previousBody) {
+      const ownedColliderHandles = new Set<number>();
+      for (let index = 0; index < previousBody.numColliders(); index += 1) {
+        ownedColliderHandles.add(previousBody.collider(index).handle);
+      }
+      for (const contacts of contactsRef.current.values()) {
+        for (const handle of ownedColliderHandles) {
+          contacts.delete(handle + 1);
+          contacts.delete(-(handle + 1));
+        }
+      }
+    }
     bodyRef.current = body;
     if (body) {
       bodyMapRef.current.set(cup.id, body);
@@ -236,6 +252,7 @@ function CupBody({
     } else {
       bodyMapRef.current.delete(cup.id);
       contactsRef.current.delete(cup.id);
+      contactTokensRef.current.clear();
     }
   }, [bodyMapRef, contactsRef, cup.id]);
 
@@ -248,9 +265,16 @@ function CupBody({
     body.setAngvel({ x: cup.angularVelocity[0], y: cup.angularVelocity[1], z: cup.angularVelocity[2] }, true);
   }, [cup.angularVelocity, cup.position, cup.rotation, cup.velocity, restoreEpoch]);
 
-  const updateContact = (handle: number, present: boolean) => {
+  const updateContact = (handle: number, otherCupId: unknown, present: boolean) => {
     const contacts = contactsRef.current.get(cup.id) ?? new Set<number>();
-    if (present) contacts.add(handle); else contacts.delete(handle);
+    const inferredToken = typeof otherCupId === 'number' ? -(handle + 1) : handle + 1;
+    if (present) {
+      contactTokensRef.current.set(handle, inferredToken);
+      contacts.add(inferredToken);
+    } else {
+      contacts.delete(contactTokensRef.current.get(handle) ?? inferredToken);
+      contactTokensRef.current.delete(handle);
+    }
     contactsRef.current.set(cup.id, contacts);
   };
 
@@ -269,11 +293,23 @@ function CupBody({
     additionalSolverIterations={2}
     userData={{ cupId: cup.id }}
     onCollisionEnter={(event) => {
-      updateContact(event.other.collider.handle, true);
       const otherId = event.other.rigidBodyObject?.userData?.cupId;
-      if (typeof otherId === 'number' && otherId !== cup.id) onCupCollision(cup.id, otherId);
+      updateContact(event.other.collider.handle, otherId, true);
+      if (typeof otherId === 'number' && otherId !== cup.id) {
+        const ownVelocity = bodyRef.current?.linvel();
+        const otherVelocity = event.other.rigidBody?.linvel();
+        if (ownVelocity && otherVelocity && Math.hypot(
+          ownVelocity.x - otherVelocity.x,
+          ownVelocity.y - otherVelocity.y,
+          ownVelocity.z - otherVelocity.z,
+        ) >= settings.wakeImpulse) {
+          cup.sleepMs = 0;
+          bodyRef.current?.wakeUp();
+        }
+        onCupCollision(cup.id, otherId);
+      }
     }}
-    onCollisionExit={(event) => updateContact(event.other.collider.handle, false)}
+    onCollisionExit={(event) => updateContact(event.other.collider.handle, event.other.rigidBodyObject?.userData?.cupId, false)}
   >
     <CylinderCollider
       args={[height * 0.065, radius * 0.52]}
@@ -309,6 +345,8 @@ function CupBody({
       height={height}
       showLevel={settings.levels}
       showHalo={settings.occlusionCues}
+      quality={settings.quality}
+      microDetails={microDetails}
     />
   </RigidBody>;
 }
@@ -422,25 +460,36 @@ function PhysicsMonitor({
       cup.ageMs += deltaMs;
       cup.mergeLockMs = Math.max(0, cup.mergeLockMs - deltaMs);
       const radius = cupRadius(cup.level, settings);
-      const speed = Math.hypot(velocity.x, velocity.z);
-      const contacts = contactsRef.current.get(cup.id)?.size ?? 0;
+      const planarSpeed = Math.hypot(velocity.x, velocity.z);
+      const spatialSpeed = Math.hypot(velocity.x, velocity.y, velocity.z);
+      const contactSet = contactsRef.current.get(cup.id);
+      const contacts = contactSet?.size ?? 0;
+      let hasCupContact = false;
+      if (contactSet) {
+        for (const token of contactSet) {
+          if (token < 0) {
+            hasCupContact = true;
+            break;
+          }
+        }
+      }
       if (position.z + radius < dangerLine - 0.08) cup.safeExited = true;
-      if (!body.isSleeping() && contacts > 0 && speed < settings.bounceCutoff) {
+      if (!body.isSleeping() && contacts > 0 && spatialSpeed < settings.bounceCutoff) {
         const settle = Math.pow(0.84, delta * 60);
         body.setLinvel({ x: velocity.x * settle, y: velocity.y * 0.72, z: velocity.z * settle }, false);
       }
-      if (contacts > 0 && speed < settings.sleepSpeed) cup.sleepMs += deltaMs;
+      if (contacts > 0 && spatialSpeed < settings.sleepSpeed) cup.sleepMs += deltaMs;
       else cup.sleepMs = Math.max(0, cup.sleepMs - deltaMs * 2);
       if (!body.isSleeping() && cup.sleepMs >= settings.sleepDelayMs) body.sleep();
 
-      const stable = body.isSleeping() || (contacts > 0 && speed < Math.max(0.14, settings.sleepSpeed * 2));
+      const stable = body.isSleeping() || (contacts > 0 && spatialSpeed < Math.max(0.14, settings.sleepSpeed * 2));
       const penetration = position.z + radius - dangerLine;
       const inDanger = penetration > Math.max(0.1, radius * settings.dangerPenetration);
-      if ((cup.safeExited || cup.ageMs > 1200) && stable && inDanger) cup.dangerMs += deltaMs;
+      if (isStackDanger(cup, stable, inDanger, hasCupContact)) cup.dangerMs += deltaMs;
       else cup.dangerMs = Math.max(0, cup.dangerMs - deltaMs * 3);
       if (cup.dangerMs >= settings.gameOverMs) shouldEnd = true;
 
-      const escaped = (position.z > LANE_NEAR + 0.65 && speed > settings.returnSpeed) || position.y < -2.5;
+      const escaped = (position.z > LANE_NEAR + 0.65 && planarSpeed > settings.returnSpeed) || position.y < -2.5;
       if (escaped && cup.ageMs > 300 && !recycleGuard.current.has(cup.id)) {
         recycleGuard.current.add(cup.id);
         onRecycle(cup.id);
@@ -462,7 +511,7 @@ function PreviewCup({ level, aim, settings }: { level: number; aim: AimState; se
       <ringGeometry args={[radius * 0.9, radius * 1.14, 36]}/><meshBasicMaterial color="#fff4c5" transparent opacity={0.28} depthWrite={false}/>
     </mesh>
     <CupModel3D theme={settings.theme} level={level} radius={radius} height={height}
-      showLevel={settings.levels} showHalo={settings.occlusionCues} preview/>
+      showLevel={settings.levels} showHalo={settings.occlusionCues} quality={settings.quality} preview/>
   </group>;
 }
 
@@ -487,9 +536,11 @@ function World({ props }: { props: SceneProps }) {
         debug={props.settings.debugHitboxes}
       >
         <LanePhysics settings={props.settings}/>
-        {props.cups.map((cup) => <CupBody key={`${cup.id}-${props.restoreEpoch}`} cup={cup} settings={props.settings}
+        {props.cups.map((cup, index) => <CupBody key={`${cup.id}-${props.restoreEpoch}`} cup={cup} settings={props.settings}
           restoreEpoch={props.restoreEpoch} bodyMapRef={props.bodyMapRef} contactsRef={props.contactsRef}
-          onCupCollision={props.onCupCollision}/>) }
+          onCupCollision={props.onCupCollision}
+          microDetails={props.settings.quality === 'cinematic' || (props.settings.quality === 'balanced' &&
+            (props.cups.length <= 28 || index >= props.cups.length - 18))}/>) }
         <PhysicsMonitor cupsRef={props.cupsRef} bodyMapRef={props.bodyMapRef} contactsRef={props.contactsRef}
           settings={props.settings} dangerLine={props.dangerLine} safeUntilRef={props.safeUntilRef}
           onGameOver={props.onGameOver} onRecycle={props.onRecycle} active={!props.paused && !props.gameOver}/>

@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import {
   CupKind,
+  GraphicsQuality,
   LEVELS,
   Theme,
   isPremiumTheme,
@@ -29,15 +30,15 @@ function liquidColor(theme: Theme, level: number) {
   return LEVELS[level]?.color ?? LEVELS[0].color;
 }
 
-function GlassMaterial({ premium }: { premium: boolean }) {
-  if (!premium) {
+function GlassMaterial({ premium, quality }: { premium: boolean; quality: GraphicsQuality }) {
+  if (!premium || quality === 'eco') {
     return <meshStandardMaterial color="#e6fbff" transparent opacity={0.48} roughness={0.18} metalness={0.02} depthWrite={false}/>;
   }
   return <meshPhysicalMaterial
     color="#f4fdff"
     transparent
-    opacity={0.4}
-    transmission={0.28}
+    opacity={quality === 'cinematic' ? 0.4 : 0.46}
+    transmission={quality === 'cinematic' ? 0.28 : 0}
     thickness={0.18}
     ior={1.45}
     roughness={0.06}
@@ -49,15 +50,15 @@ function GlassMaterial({ premium }: { premium: boolean }) {
   />;
 }
 
-function LiquidMaterial({ color, premium, emissive = false }: { color: string; premium: boolean; emissive?: boolean }) {
-  if (!premium) return <meshStandardMaterial color={color} roughness={0.32} metalness={0.02}/>;
+function LiquidMaterial({ color, premium, quality, emissive = false }: { color: string; premium: boolean; quality: GraphicsQuality; emissive?: boolean }) {
+  if (!premium || quality === 'eco') return <meshStandardMaterial color={color} roughness={0.32} metalness={0.02}/>;
   return <meshPhysicalMaterial
     color={color}
     emissive={emissive ? color : '#000000'}
     emissiveIntensity={emissive ? 0.13 : 0}
     transparent
     opacity={0.9}
-    transmission={0.06}
+    transmission={quality === 'cinematic' ? 0.06 : 0}
     roughness={0.16}
     metalness={0.03}
     clearcoat={0.55}
@@ -108,9 +109,9 @@ function Watermelon({ position = [0.48, 2.02, 0] as [number, number, number] }) 
   </group>;
 }
 
-function SundaeTop({ level, color, premium }: { level: number; color: string; premium: boolean }) {
+function SundaeTop({ level, color, premium, quality }: { level: number; color: string; premium: boolean; quality: GraphicsQuality }) {
   return <group position={[0, 1.84, 0]}>
-    <mesh castShadow scale={[0.76, 0.45, 0.76]}><sphereGeometry args={[1, 24, 16]}/><LiquidMaterial color={color} premium={premium}/></mesh>
+    <mesh castShadow scale={[0.76, 0.45, 0.76]}><sphereGeometry args={[1, 24, 16]}/><LiquidMaterial color={color} premium={premium} quality={quality}/></mesh>
     <mesh position={[0, 0.35, 0]} castShadow scale={[0.53, 0.32, 0.53]}><sphereGeometry args={[1, 20, 14]}/><meshPhysicalMaterial color="#fff8e7" roughness={0.24} clearcoat={0.28}/></mesh>
     {level === 0 && <mesh position={[0.18, 0.6, 0]} rotation={[0.2, 0, -0.35]} castShadow><boxGeometry args={[0.28, 0.38, 0.08]}/><meshStandardMaterial color="#f4cc77" roughness={0.65}/></mesh>}
     {level === 1 && <Citrus color="#e48b2f" position={[0.42, 0.42, 0]}/>}
@@ -122,15 +123,15 @@ function SundaeTop({ level, color, premium }: { level: number; color: string; pr
   </group>;
 }
 
-function JuiceLiquid({ level, color, premium }: { level: number; color: string; premium: boolean }) {
+function JuiceLiquid({ level, color, premium, quality }: { level: number; color: string; premium: boolean; quality: GraphicsQuality }) {
   if (level !== 6) return <mesh position={[0, 1.08, 0]} castShadow receiveShadow>
-    <cylinderGeometry args={[0.82, 0.6, 1.68, 32]}/><LiquidMaterial color={color} premium={premium}/>
+    <cylinderGeometry args={[0.82, 0.6, 1.68, 32]}/><LiquidMaterial color={color} premium={premium} quality={quality}/>
   </mesh>;
   const rainbow = ['#7a4acb', '#2aa8df', '#43bd70', '#f1d33c', '#ff8c2a', '#ef405f'];
   return <group>
     {rainbow.map((layer, index) => <mesh key={layer} position={[0, 0.37 + index * 0.275, 0]} castShadow>
       <cylinderGeometry args={[0.64 + index * 0.031, 0.61 + index * 0.031, 0.29, 32]}/>
-      <LiquidMaterial color={layer} premium={premium} emissive={index === rainbow.length - 1}/>
+      <LiquidMaterial color={layer} premium={premium} quality={quality} emissive={index === rainbow.length - 1}/>
     </mesh>)}
   </group>;
 }
@@ -161,13 +162,13 @@ function WineDetails({ level, premium }: { level: number; premium: boolean }) {
   </>;
 }
 
-function IceAndBubbles({ premium, kind }: { premium: boolean; kind: CupKind }) {
-  if (!premium || kind === 'sundae') return null;
+function IceAndBubbles({ premium, kind, quality }: { premium: boolean; kind: CupKind; quality: GraphicsQuality }) {
+  if (!premium || kind === 'sundae' || quality === 'eco') return null;
   const ice = [[-0.25, 1.0, 0.15], [0.24, 1.34, -0.1], [0.1, 0.72, 0.23]];
   const bubbles = [[-0.36, 1.46, 0.22], [0.32, 1.1, 0.25], [-0.12, 1.75, 0.3], [0.42, 1.66, -0.08]];
   return <>
     {ice.map((position, index) => <mesh key={`ice-${index}`} position={position as [number, number, number]} rotation={[0.2 * index, 0.35 * index, 0.14]} castShadow>
-      <boxGeometry args={[0.36, 0.31, 0.32]}/><meshPhysicalMaterial color="#f7ffff" transparent opacity={0.36} roughness={0.08} transmission={0.35}/>
+      <boxGeometry args={[0.36, 0.31, 0.32]}/><meshPhysicalMaterial color="#f7ffff" transparent opacity={0.36} roughness={0.08} transmission={quality === 'cinematic' ? 0.35 : 0}/>
     </mesh>)}
     {bubbles.map((position, index) => <mesh key={`bubble-${index}`} position={position as [number, number, number]}>
       <sphereGeometry args={[0.035 + index * 0.006, 8, 6]}/><meshStandardMaterial color="#ffffff" transparent opacity={0.7}/>
@@ -215,6 +216,8 @@ export function CupModel3D({
   height,
   showLevel,
   showHalo,
+  quality,
+  microDetails = true,
   preview = false,
 }: {
   theme: Theme;
@@ -223,6 +226,8 @@ export function CupModel3D({
   height: number;
   showLevel: boolean;
   showHalo: boolean;
+  quality: GraphicsQuality;
+  microDetails?: boolean;
   preview?: boolean;
 }) {
   const gltf = useGLTF('/models/cups-v5.glb');
@@ -235,14 +240,14 @@ export function CupModel3D({
   const scale: [number, number, number] = [radius / info.radius, height / info.height, radius / info.radius];
 
   return <group scale={scale} renderOrder={preview ? 4 : 1}>
-    {kind === 'juice' && <JuiceLiquid level={level} color={color} premium={premium}/>}
-    {kind === 'sundae' && <SundaeTop level={level} color={color} premium={premium}/>}
+    {kind === 'juice' && <JuiceLiquid level={level} color={color} premium={premium} quality={quality}/>}
+    {kind === 'sundae' && <SundaeTop level={level} color={color} premium={premium} quality={quality}/>}
     {kind === 'wine' && <mesh position={[0, 1.48, 0]} scale={[0.92, 0.58, 0.92]} castShadow={!preview}>
-      <sphereGeometry args={[0.82, 28, 18]}/><LiquidMaterial color={color} premium={premium} emissive={level >= 5}/>
+      <sphereGeometry args={[0.82, 28, 18]}/><LiquidMaterial color={color} premium={premium} quality={quality} emissive={level >= 5}/>
     </mesh>}
-    <IceAndBubbles premium={premium} kind={kind}/>
+    {microDetails && <IceAndBubbles premium={premium} kind={kind} quality={quality}/>}
     {shell && <mesh geometry={shell.geometry} castShadow={!preview} receiveShadow>
-      <GlassMaterial premium={premium}/>
+      <GlassMaterial premium={premium} quality={quality}/>
     </mesh>}
     {kind === 'juice' && <JuiceDetails level={level} premium={premium}/>}
     {kind === 'wine' && <WineDetails level={level} premium={premium}/>}

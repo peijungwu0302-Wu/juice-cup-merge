@@ -11,7 +11,6 @@ import {
   BurstState,
   CupState,
   DEFAULTS,
-  DEFAULT_LEVEL_SIZES,
   DYNAMIC_DANGER_MIN_Z,
   DYNAMIC_DANGER_START_Z,
   FIXED_DANGER_Z,
@@ -32,7 +31,7 @@ import {
   maxLaunchX,
   speedToWorld,
 } from './game/config';
-import { powerFromGesture, validateLevelSizes } from './game/core';
+import { normalizeSettings, powerFromGesture, selectControlledLevel } from './game/core';
 
 const GameScene = lazy(() => import('./game/GameScene').then((module) => ({ default: module.GameScene })));
 
@@ -43,7 +42,7 @@ class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean
     console.error('V5 3D scene failed to initialize', error, info.componentStack);
   }
   render() {
-    if (this.state.failed) return <div className="scene-error"><b>3D 場景暫時無法載入</b><small>請確認網路後重新整理，線上紀錄不會受影響。</small><button onClick={() => location.reload()}>重新載入</button></div>;
+    if (this.state.failed) return <div className="scene-error"><b>3D 場景暫時無法載入</b><small>請確認網路後重新整理，最高分與累積訂單不會受影響。</small><button onClick={() => location.reload()}>重新載入</button></div>;
     return this.props.children;
   }
 }
@@ -73,19 +72,25 @@ const EMPTY_GESTURE: Gesture = {
   samples: [],
 };
 
-function normalizedSettings(stored: Partial<Settings> | null): Settings {
-  const merged = { ...DEFAULTS, ...(stored ?? {}) };
-  const themes: Theme[] = ['premiumJuice', 'simpleJuice', 'premiumSundae', 'simpleSundae', 'premiumWine', 'simpleWine'];
-  const qualities: GraphicsQuality[] = ['eco', 'balanced', 'cinematic'];
-  return {
-    ...merged,
-    theme: themes.includes(merged.theme) ? merged.theme : DEFAULTS.theme,
-    quality: qualities.includes(merged.quality) ? merged.quality : DEFAULTS.quality,
-    levelSizes: validateLevelSizes(merged.levelSizes, DEFAULT_LEVEL_SIZES),
-    size: clamp(Number(merged.size) || 1, 0.55, 2.2),
-    solverIterations: Math.round(clamp(Number(merged.solverIterations) || DEFAULTS.solverIterations, 4, 16)),
-    ccdSubsteps: Math.round(clamp(Number(merged.ccdSubsteps) || DEFAULTS.ccdSubsteps, 1, 4)),
-  };
+function persist(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage can be unavailable in private browsing; the current run remains playable.
+  }
+}
+
+function recall(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storedCount(key: string) {
+  const parsed = Number(recall(key));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 function freshCup(id: number, level: number, x: number, angle: number, power: number, settings: Settings): CupState {
@@ -135,6 +140,7 @@ export default function Home() {
   const lastLaunchXRef = useRef(0);
   const mergeGuardRef = useRef(new Set<number>());
   const hydratedRef = useRef(false);
+  const audioRef = useRef<AudioContext | null>(null);
 
   const [mounted, setMounted] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
@@ -190,26 +196,10 @@ export default function Home() {
       bagRef.current = bag;
     }
     const baseLevel = bagRef.current.shift() ?? 0;
-    if (luckyCooldownRef.current > 0) {
-      luckyCooldownRef.current -= 1;
-      return baseLevel;
-    }
-    const candidates = [
-      { level: 4, chance: 0.0015, eligible: unlockedRef.current >= 4 && shotsRef.current >= 55 && ordersRef.current >= 2 },
-      { level: 3, chance: 0.007, eligible: unlockedRef.current >= 3 && shotsRef.current >= 28 && ordersRef.current >= 1 },
-      { level: 2, chance: 0.03, eligible: unlockedRef.current >= 2 && shotsRef.current >= 12 },
-    ];
-    const roll = Math.random();
-    let threshold = 0;
-    for (const candidate of candidates) {
-      if (!candidate.eligible) continue;
-      threshold += candidate.chance;
-      if (roll < threshold) {
-        luckyCooldownRef.current = 10;
-        return candidate.level;
-      }
-    }
-    return baseLevel;
+    const selected = selectControlledLevel(baseLevel, unlockedRef.current, shotsRef.current, ordersRef.current,
+      luckyCooldownRef.current, Math.random());
+    luckyCooldownRef.current = selected.luckyCooldown;
+    return selected.level;
   }, []);
 
   const syncBodies = useCallback(() => {
@@ -295,16 +285,16 @@ export default function Home() {
     setMounted(true);
     let loaded: Settings = DEFAULTS;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem('juice-v43-settings');
-      loaded = normalizedSettings(raw ? JSON.parse(raw) as Partial<Settings> : null);
+      const raw = recall(STORAGE_KEY) ?? recall('juice-v43-settings');
+      loaded = normalizeSettings(raw ? JSON.parse(raw) as Partial<Settings> : null);
     } catch {
       loaded = DEFAULTS;
     }
     settingsRef.current = loaded;
     setSettings(loaded);
-    setBest(Number(localStorage.getItem('juice-best') || 0));
-    setBestClean(Number(localStorage.getItem('juice-best-clean') || 0));
-    const storedOrders = Number(localStorage.getItem('juice-orders') || 0);
+    setBest(storedCount('juice-best'));
+    setBestClean(storedCount('juice-best-clean'));
+    const storedOrders = storedCount('juice-orders');
     lifetimeOrdersRef.current = storedOrders;
     setLifetimeOrders(storedOrders);
     hydratedRef.current = true;
@@ -313,7 +303,7 @@ export default function Home() {
 
   useEffect(() => {
     settingsRef.current = settings;
-    if (hydratedRef.current) localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    if (hydratedRef.current) persist(STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
 
   useEffect(() => {
@@ -325,7 +315,12 @@ export default function Home() {
       setPowerPreview(0);
     };
     document.addEventListener('visibilitychange', pauseWhenHidden);
-    return () => document.removeEventListener('visibilitychange', pauseWhenHidden);
+    return () => {
+      document.removeEventListener('visibilitychange', pauseWhenHidden);
+      const audio = audioRef.current;
+      audioRef.current = null;
+      if (audio && audio.state !== 'closed') void audio.close().catch(() => undefined);
+    };
   }, []);
 
   const signal = useCallback((strong = false) => {
@@ -335,7 +330,12 @@ export default function Home() {
     try {
       const AudioCtor = window.AudioContext ||
         (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const audio = new AudioCtor();
+      let audio = audioRef.current;
+      if (!audio || audio.state === 'closed') {
+        audio = new AudioCtor();
+        audioRef.current = audio;
+      }
+      if (audio.state === 'suspended') void audio.resume().catch(() => undefined);
       const oscillator = audio.createOscillator();
       const gain = audio.createGain();
       oscillator.type = strong ? 'sawtooth' : 'sine';
@@ -344,6 +344,10 @@ export default function Home() {
       gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.18);
       oscillator.connect(gain);
       gain.connect(audio.destination);
+      oscillator.addEventListener('ended', () => {
+        oscillator.disconnect();
+        gain.disconnect();
+      }, { once: true });
       oscillator.start();
       oscillator.stop(audio.currentTime + 0.18);
     } catch {
@@ -357,13 +361,13 @@ export default function Home() {
     setScore(next);
     setBest((current) => {
       const value = Math.max(current, next);
-      localStorage.setItem('juice-best', String(value));
+      persist('juice-best', String(value));
       return value;
     });
     if (revivesRef.current === 0) {
       setBestClean((current) => {
         const value = Math.max(current, next);
-        localStorage.setItem('juice-best-clean', String(value));
+        persist('juice-best-clean', String(value));
         return value;
       });
     }
@@ -378,7 +382,7 @@ export default function Home() {
     const lifetime = lifetimeOrdersRef.current + 1;
     lifetimeOrdersRef.current = lifetime;
     setLifetimeOrders(lifetime);
-    localStorage.setItem('juice-orders', String(lifetime));
+    persist('juice-orders', String(lifetime));
   }, []);
 
   const addBurst = useCallback((burst: Omit<BurstState, 'id' | 'createdAt'>) => {
@@ -393,10 +397,14 @@ export default function Home() {
     const second = cupsRef.current.find((cup) => cup.id === secondId);
     if (!first || !second || first.level !== second.level || first.mergeLockMs > 0 || second.mergeLockMs > 0) return;
     if (mergeGuardRef.current.has(firstId) || mergeGuardRef.current.has(secondId)) return;
+    const active = settingsRef.current;
     mergeGuardRef.current.add(firstId);
     mergeGuardRef.current.add(secondId);
+    window.setTimeout(() => {
+      mergeGuardRef.current.delete(firstId);
+      mergeGuardRef.current.delete(secondId);
+    }, Math.max(600, active.mergeSettleMs + 250));
     syncBodies();
-    const active = settingsRef.current;
     const massA = Math.pow(cupRadius(first.level, active), 3);
     const massB = Math.pow(cupRadius(second.level, active), 3);
     const totalMass = massA + massB;
@@ -568,6 +576,14 @@ export default function Home() {
     return { x: (projected.x + 1) * rect.width / 2, y: (1 - projected.y) * rect.height / 2 };
   }, []);
 
+  const handleCamera = useCallback((camera: THREE.PerspectiveCamera | null) => {
+    cameraRef.current = camera;
+  }, []);
+
+  const handleSceneReady = useCallback(() => {
+    setSceneReady(true);
+  }, []);
+
   const screenToLaunchX = useCallback((screenX: number, rect: DOMRect) => {
     const active = settingsRef.current;
     const level = queueRef.current[0] ?? 0;
@@ -614,7 +630,9 @@ export default function Home() {
         else mode = 'throw';
       }
       gestureRef.current = { active: true, pointerId: event.pointerId, mode, originX: x, originY: y,
-        lastX: x, lastY: y, positionLocked: false, samples: [{ y, t: now }] };
+        lastX: x, lastY: y,
+        positionLocked: mode === 'direct' && active.straightStabilizer && active.straightLockDistance <= 0,
+        samples: [{ y, t: now }] };
       if (mode === 'direct') commitAim({ x: screenToLaunchX(x, rect), angle: 0, locked: false });
       if (mode === 'aim') commitAim({ ...currentAim, locked: false });
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -650,7 +668,12 @@ export default function Home() {
           commitAim({ x: screenToLaunchX(x, rect), angle: 0, locked: false });
           if (active.straightStabilizer && upward >= active.straightLockDistance) gesture.positionLocked = true;
         }
-        setPowerPreview(clamp(upward / active.throwThreshold, 0, 1));
+        if (active.power) {
+          const power = powerFromGesture(gesture.originY, y, gesture.samples, now, active);
+          const low = Math.min(active.minPower, active.maxPower);
+          const high = Math.max(active.minPower, active.maxPower);
+          setPowerPreview(clamp((power - low) / Math.max(0.1, high - low), 0, 1));
+        } else setPowerPreview(clamp(upward / active.throwThreshold, 0, 1));
       } else if (gesture.mode === 'throw') {
         const power = powerFromGesture(gesture.originY, y, gesture.samples, now, active);
         const low = Math.min(active.minPower, active.maxPower);
@@ -715,7 +738,24 @@ export default function Home() {
   }, []);
 
   const patchSettings = useCallback((patch: Partial<Settings>) => {
-    const next = normalizedSettings({ ...settingsRef.current, ...patch });
+    const previous = settingsRef.current;
+    const next = normalizeSettings({ ...previous, ...patch });
+    if (patch.slope !== undefined && next.slope !== previous.slope) {
+      syncBodies();
+      const delta = Math.atan(next.slope) - Math.atan(previous.slope);
+      const cosine = Math.cos(delta);
+      const sine = Math.sin(delta);
+      for (const cup of cupsRef.current) {
+        const oldSurface = laneSurfaceY(cup.position[2], previous.slope);
+        cup.position[1] = laneSurfaceY(cup.position[2], next.slope) + (cup.position[1] - oldSurface);
+        const [, velocityY, velocityZ] = cup.velocity;
+        cup.velocity[1] = velocityY * cosine + velocityZ * sine;
+        cup.velocity[2] = -velocityY * sine + velocityZ * cosine;
+        const body = bodyMapRef.current.get(cup.id);
+        body?.setTranslation({ x: cup.position[0], y: cup.position[1], z: cup.position[2] }, false);
+        body?.setLinvel({ x: cup.velocity[0], y: cup.velocity[1], z: cup.velocity[2] }, false);
+      }
+    }
     settingsRef.current = next;
     setSettings(next);
     if (patch.dynamicDanger !== undefined) {
@@ -728,19 +768,22 @@ export default function Home() {
       const maximum = maxLaunchX(queueRef.current[0] ?? 0, next);
       commitAim((current) => ({ ...current, x: clamp(current.x, -maximum, maximum) }));
     }
-  }, [commitAim, commitDanger, resetAim]);
+  }, [commitAim, commitDanger, resetAim, syncBodies]);
 
   const applyPreset = useCallback((kind: 'stable' | 'balanced' | 'extreme') => {
     if (kind === 'stable') patchSettings({ wallRest: 0.72, cupRest: 0.1, drag: 0.982, slope: 0.012, fixedSpeed: 8,
       minPower: 7, maxPower: 14, sleepSpeed: 0.11, sleepDelayMs: 300, laneFriction: 0.28, cupFriction: 0.2,
-      angularDamping: 3.2, solverIterations: 9, gameOverMs: 1450 });
+      angularDamping: 3.2, solverIterations: 9, contactSlop: 0.55, bounceCutoff: 0.75, wakeImpulse: 0.6,
+      mergeSettleMs: 190, gameOverMs: 1450 });
     else if (kind === 'balanced') patchSettings({ wallRest: 0.91, frontRest: 0.12, cupRest: 0.22,
       drag: 0.994, slope: 0.01, fixedSpeed: 9, minPower: 10, maxPower: 16, sleepSpeed: 0.08,
       sleepDelayMs: 420, contactSlop: 0.45, dangerPenetration: 0.32, returnSpeed: 0.8,
+      bounceCutoff: 0.55, wakeImpulse: 0.45, mergeSettleMs: 160,
       laneFriction: 0.18, cupFriction: 0.12, angularDamping: 2.4, solverIterations: 8, ccdSubsteps: 2,
       gameOverMs: 1400 });
     else patchSettings({ wallRest: 0.985, frontRest: 0.28, cupRest: 0.34, drag: 0.994, slope: 0.006,
       fixedSpeed: 10.5, minPower: 10, maxPower: 24, sleepSpeed: 0.045, sleepDelayMs: 680,
+      contactSlop: 0.3, bounceCutoff: 0.2, wakeImpulse: 0.25, mergeSettleMs: 90,
       laneFriction: 0.08, cupFriction: 0.06, angularDamping: 1.2, solverIterations: 8, ccdSubsteps: 3 });
   }, [patchSettings]);
 
@@ -762,8 +805,8 @@ export default function Home() {
       {mounted && <SceneBoundary><Suspense fallback={null}><GameScene cups={cups} cupsRef={cupsRef} bodyMapRef={bodyMapRef} contactsRef={contactsRef}
         settings={settings} paused={paused} gameOver={gameOver} aim={aim} nextLevel={queue[0] ?? 0}
         dangerLine={dangerLine} bursts={bursts} restoreEpoch={restoreEpoch} safeUntilRef={safeUntilRef}
-        onCamera={(camera) => { cameraRef.current = camera; }} onCupCollision={handleCupCollision}
-        onGameOver={handleGameOver} onRecycle={handleRecycle} onReady={() => setSceneReady(true)}/></Suspense></SceneBoundary>}
+        onCamera={handleCamera} onCupCollision={handleCupCollision}
+        onGameOver={handleGameOver} onRecycle={handleRecycle} onReady={handleSceneReady}/></Suspense></SceneBoundary>}
       {!sceneReady && <div className="scene-loading"><span/><b>正在準備 3D 跑道</b></div>}
       <div className="field-badges">
         {historyCount > 0 && <button onClick={undo} aria-label={`復原上一步，尚有 ${historyCount} 次`}>↶ <small>{historyCount}</small></button>}
@@ -849,6 +892,9 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="休眠速度" value={settings.sleepSpeed} min={0.02} max={0.3} step={0.005} onChange={(value) => patch({ sleepSpeed: value })}/>
         <Slider title="休眠等待" value={settings.sleepDelayMs} min={100} max={1200} step={20} unit="ms" onChange={(value) => patch({ sleepDelayMs: value })}/>
         <Slider title="碰撞皮膚誤差" value={settings.contactSlop} min={0} max={1.5} step={0.05} onChange={(value) => patch({ contactSlop: value })}/>
+        <Slider title="低速安定門檻" value={settings.bounceCutoff} min={0} max={2} step={0.05} onChange={(value) => patch({ bounceCutoff: value })}/>
+        <Slider title="碰撞喚醒門檻" value={settings.wakeImpulse} min={0.1} max={2} step={0.05} onChange={(value) => patch({ wakeImpulse: value })}/>
+        <Slider title="融合安定時間" value={settings.mergeSettleMs} min={0} max={400} step={10} unit="ms" onChange={(value) => patch({ mergeSettleMs: value })}/>
         <Slider title="危險線深入比例" value={settings.dangerPenetration} min={0.1} max={0.8} step={0.02} onChange={(value) => patch({ dangerPenetration: value })}/>
         <Slider title="高速回收門檻" value={settings.returnSpeed} min={0.2} max={4} step={0.1} onChange={(value) => patch({ returnSpeed: value })}/>
         <Slider title="攝影機高度" value={settings.cameraHeight} min={9.5} max={16} step={0.1} onChange={(value) => patch({ cameraHeight: value })}/>
