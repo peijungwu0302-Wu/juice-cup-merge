@@ -8,7 +8,7 @@ const asset = (path) => new URL(path, root);
 const spec = JSON.parse(readFileSync(asset('app/game/v52-art-spec.json'), 'utf8'));
 const laneSpec = JSON.parse(readFileSync(asset('app/game/v51-asset-spec.json'), 'utf8')).lane;
 
-test('V5.7 retains 21 isolated, transparent, mobile-budgeted art sprites with per-cup foot anchors', () => {
+test('V5.7.1 retains 21 isolated, transparent, mobile-budgeted art sprites with per-cup foot anchors', () => {
   let total = 0;
   for (const kind of ['juice', 'sundae', 'wine']) {
     assert.equal(spec.sprite.themes[kind].bounds.length, 7);
@@ -26,7 +26,7 @@ test('V5.7 retains 21 isolated, transparent, mobile-budgeted art sprites with pe
     }
   }
   assert.ok(total < 3_800_000, `art sprites total ${total} bytes`);
-  assert.equal(spec.version, '5.7.0');
+  assert.equal(spec.version, '5.7.1');
 });
 
 const artCamera = () => {
@@ -105,6 +105,9 @@ test('locked same-level contacts are retried and escaped cups are recovered insi
   assert.match(scene, /onCupCollision\(cup\.id, other\.id\)/);
   assert.match(scene, /maximumCenterX = LANE_HALF - radius \* CUP_COLLIDER_RADIUS_RATIO/);
   assert.match(scene, /safetyRailHeight/);
+  assert.match(scene, /activeCupIds\.has\(cupId\)/);
+  assert.match(scene, /body\.isValid\(\)/);
+  assert.match(scene, /stale[\s\S]*wrapper must never be allowed to take down the scene/);
 });
 
 test('simple release uses the whole playfield and bypasses straight-mode position locking', () => {

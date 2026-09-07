@@ -284,10 +284,11 @@ function CupBody({
 
   const assignBody = useCallback((body: RapierRigidBody | null) => {
     const previousBody = bodyRef.current;
-    if (!body && previousBody) {
+    if (!body && previousBody?.isValid()) {
       const ownedColliderHandles = new Set<number>();
       for (let index = 0; index < previousBody.numColliders(); index += 1) {
-        ownedColliderHandles.add(previousBody.collider(index).handle);
+        const collider = previousBody.collider(index);
+        if (collider?.isValid()) ownedColliderHandles.add(collider.handle);
       }
       for (const contacts of contactsRef.current.values()) {
         for (const handle of ownedColliderHandles) {
@@ -309,7 +310,7 @@ function CupBody({
 
   useEffect(() => {
     const body = bodyRef.current;
-    if (!body) return;
+    if (!body?.isValid()) return;
     body.setTranslation({ x: cup.position[0], y: cup.position[1], z: cup.position[2] }, true);
     body.setLinvel({ x: cup.velocity[0], y: cup.velocity[1], z: cup.velocity[2] }, true);
     body.setRotation({ x: cup.rotation[0], y: cup.rotation[1], z: cup.rotation[2], w: cup.rotation[3] }, true);
@@ -488,9 +489,18 @@ function PhysicsMonitor({
     if (retryLockedContacts) contactRetryMsRef.current = 0;
     const colliderOwners = new Map<number, number>();
     if (retryLockedContacts) {
+      const activeCupIds = new Set(cupsRef.current.map((cup) => cup.id));
       for (const [cupId, body] of bodyMapRef.current) {
-        for (let index = 0; index < body.numColliders(); index += 1) {
-          colliderOwners.set(body.collider(index).handle, cupId);
+        if (!activeCupIds.has(cupId) || !body.isValid()) continue;
+        try {
+          for (let index = 0; index < body.numColliders(); index += 1) {
+            const collider = body.collider(index);
+            if (collider?.isValid()) colliderOwners.set(collider.handle, cupId);
+          }
+        } catch {
+          // React removes merged bodies just after state changes. A stale
+          // one-frame wrapper must never be allowed to take down the scene.
+          bodyMapRef.current.delete(cupId);
         }
       }
     }
@@ -498,9 +508,9 @@ function PhysicsMonitor({
     let shouldEnd = false;
     for (const cup of cupsRef.current) {
       const body = bodyMapRef.current.get(cup.id);
-      if (!body) continue;
-      const position = body.translation();
-      const velocity = body.linvel();
+      if (!body?.isValid()) continue;
+      let position = body.translation();
+      let velocity = body.linvel();
       const rotation = body.rotation();
       const angularVelocity = body.angvel();
       cup.position = [position.x, position.y, position.z];
@@ -514,11 +524,10 @@ function PhysicsMonitor({
       if (Math.abs(position.x) > maximumCenterX + 0.08) {
         const correctedX = Math.sign(position.x || 1) * maximumCenterX;
         body.setTranslation({ x: correctedX, y: position.y, z: position.z }, true);
-        body.setLinvel({ x: -velocity.x * 0.24, y: Math.min(velocity.y, 0.05), z: velocity.z * 0.96 }, true);
-        position.x = correctedX;
-        velocity.x *= -0.24;
-        velocity.y = Math.min(velocity.y, 0.05);
-        velocity.z *= 0.96;
+        const correctedVelocity = { x: -velocity.x * 0.24, y: Math.min(velocity.y, 0.05), z: velocity.z * 0.96 };
+        body.setLinvel(correctedVelocity, true);
+        position = { x: correctedX, y: position.y, z: position.z };
+        velocity = correctedVelocity;
       }
       const planarSpeed = Math.hypot(velocity.x, velocity.z);
       const spatialSpeed = Math.hypot(velocity.x, velocity.y, velocity.z);

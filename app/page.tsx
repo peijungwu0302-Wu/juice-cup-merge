@@ -221,7 +221,7 @@ export default function Home() {
   const syncBodies = useCallback(() => {
     for (const cup of cupsRef.current) {
       const body = bodyMapRef.current.get(cup.id);
-      if (!body) continue;
+      if (!body?.isValid()) continue;
       const position = body.translation();
       const velocity = body.linvel();
       const rotation = body.rotation();
@@ -451,7 +451,7 @@ export default function Home() {
         }
         const body = bodyMapRef.current.get(other.id);
         const force = (1 - distance / blastWorld) * active.blastForce;
-        body?.applyImpulse({ x: dx / distance * force, y: Math.min(0.18, force * 0.025), z: dz / distance * force }, true);
+        if (body?.isValid()) body.applyImpulse({ x: dx / distance * force, y: Math.min(0.18, force * 0.025), z: dz / distance * force }, true);
       }
       commitCups((current) => current.filter((cup) => !removed.has(cup.id)));
       award(5000 + cleared * 250);
@@ -787,8 +787,10 @@ export default function Home() {
         cup.velocity[1] = velocityY * cosine + velocityZ * sine;
         cup.velocity[2] = -velocityY * sine + velocityZ * cosine;
         const body = bodyMapRef.current.get(cup.id);
-        body?.setTranslation({ x: cup.position[0], y: cup.position[1], z: cup.position[2] }, false);
-        body?.setLinvel({ x: cup.velocity[0], y: cup.velocity[1], z: cup.velocity[2] }, false);
+        if (body?.isValid()) {
+          body.setTranslation({ x: cup.position[0], y: cup.position[1], z: cup.position[2] }, false);
+          body.setLinvel({ x: cup.velocity[0], y: cup.velocity[1], z: cup.velocity[2] }, false);
+        }
       }
     }
     settingsRef.current = next;
@@ -827,9 +829,9 @@ export default function Home() {
     reset(settingsRef.current);
   }, [reset]);
 
-  const visualModeLabel = settings.visualMode === 'art' ? '美術 5.7' : settings.visualMode === 'realtime3d' ? '即時 3D' : '陽春';
+  const visualModeLabel = settings.visualMode === 'art' ? '美術 5.7.1' : settings.visualMode === 'realtime3d' ? '即時 3D' : '陽春';
 
-  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.7">
+  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.7.1">
     <header className="hud">
       <div className="score-main hud-tile"><small>分數</small><strong>{score.toLocaleString()}</strong><em>最高 {best.toLocaleString()}・零復活 {bestClean.toLocaleString()}</em></div>
       <div className="orders hud-tile"><small>訂單</small><b>{orders}</b><em>累積 {lifetimeOrders}</em></div>
@@ -918,7 +920,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(value) => patch({ throwThreshold: value })}/>
       </div>
       <details className="developer"><summary>開發者專區 <span>即時調整 V5 物理手感</span></summary>
-        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.7 預設</button></div>
+        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.7.1 預設</button></div>
         <Toggle title="顯示碰撞骨架" note="將杯身、護欄、跑道與前牆疊在美術畫面上檢查對位" value={settings.debugHitboxes} onChange={(value) => patch({ debugHitboxes: value })}/>
         <Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(value) => patch({ maxAngle: value })}/>
         <Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(value) => patch({ fixedSpeed: value })}/>
