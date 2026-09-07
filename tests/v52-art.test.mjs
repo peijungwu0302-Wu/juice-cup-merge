@@ -8,7 +8,7 @@ const asset = (path) => new URL(path, root);
 const spec = JSON.parse(readFileSync(asset('app/game/v52-art-spec.json'), 'utf8'));
 const laneSpec = JSON.parse(readFileSync(asset('app/game/v51-asset-spec.json'), 'utf8')).lane;
 
-test('V5.5 retains 21 isolated, transparent, mobile-budgeted art sprites with per-cup foot anchors', () => {
+test('V5.6 retains 21 isolated, transparent, mobile-budgeted art sprites with per-cup foot anchors', () => {
   let total = 0;
   for (const kind of ['juice', 'sundae', 'wine']) {
     assert.equal(spec.sprite.themes[kind].bounds.length, 7);
@@ -26,11 +26,11 @@ test('V5.5 retains 21 isolated, transparent, mobile-budgeted art sprites with pe
     }
   }
   assert.ok(total < 3_800_000, `art sprites total ${total} bytes`);
-  assert.equal(spec.version, '5.5.0');
+  assert.equal(spec.version, '5.6.0');
 });
 
-const artCamera = (aspect) => {
-  const camera = new THREE.PerspectiveCamera(spec.lane.portraitFov, aspect, 0.1, 80);
+const artCamera = () => {
+  const camera = new THREE.PerspectiveCamera(spec.lane.portraitFov, spec.lane.referenceAspect, 0.1, 80);
   camera.position.set(...spec.lane.cameraPosition);
   camera.lookAt(...spec.lane.cameraTarget);
   camera.updateProjectionMatrix();
@@ -44,7 +44,7 @@ const project = (camera, point) => {
 };
 
 test('the fixed art camera projects five lane anchors onto the shared guides', () => {
-  const camera = artCamera(spec.lane.referenceAspect);
+  const camera = artCamera();
   const half = laneSpec.width / 2;
   for (const guide of [spec.lane.farGuide, spec.lane.midGuide, spec.lane.nearGuide]) {
     const left = project(camera, [-half, 0, guide.z]);
@@ -64,14 +64,16 @@ test('the art camera is 10–15% deeper without changing the physical lane lengt
   assert.equal(laneSpec.length, 19.6);
 });
 
-test('the calibrated camera responds continuously across phone aspect ratios', () => {
+test('the calibrated art projection stays locked to the stretched background on every phone aspect', () => {
   const half = laneSpec.width / 2;
-  for (const aspect of [0.52, 0.56, 0.62]) {
-    const camera = artCamera(aspect);
+  const scene = readFileSync(asset('app/game/GameScene.tsx'), 'utf8');
+  assert.match(scene, /camera\.aspect = artMode[\s\S]*ART_ASSET\.lane\.referenceAspect/);
+  for (const displayAspect of [0.52, 0.56, 0.62]) {
+    assert.ok(displayAspect > 0);
+    const camera = artCamera();
     for (const guide of [spec.lane.farGuide, spec.lane.midGuide, spec.lane.nearGuide]) {
       const left = project(camera, [-half, 0, guide.z]);
-      const expectedX = 0.5 + (guide.leftX - 0.5) * spec.lane.referenceAspect / aspect;
-      assert.ok(Math.abs(left.x - expectedX) < 0.001);
+      assert.ok(Math.abs(left.x - guide.leftX) < 0.001);
       assert.ok(Math.abs(left.y - guide.y) < 0.001);
     }
   }
@@ -85,13 +87,20 @@ test('art mode uses one seamless background and no runtime rail overlay', () => 
   assert.match(styles, /background-size: 100% 100%/);
 });
 
-test('art cups stand on a vertical yaw-only plane with two ground-contact shadows', () => {
+test('art cups retain their original billboard proportions with two ground-contact shadows', () => {
   const model = readFileSync(asset('app/game/CupModel.tsx'), 'utf8');
-  assert.match(model, /<Billboard follow lockX lockZ>/);
-  assert.match(model, /spriteCenterY/);
+  assert.match(model, /<sprite position=\{\[0, -bottomPaddingWorld, 0\]\} scale=\{\[spriteWidth, spriteHeight, 1\]\}/);
+  assert.doesNotMatch(model, /<Billboard/);
   assert.match(model, /getArtShadowTexture\('contact'\)/);
   assert.match(model, /getArtShadowTexture\('ambient'\)/);
   assert.match(model, /footInsets/);
+});
+
+test('simple release uses the whole playfield and bypasses straight-mode position locking', () => {
+  const page = readFileSync(asset('app/page.tsx'), 'utf8');
+  assert.match(page, /releaseArmed: simpleRelease/);
+  assert.match(page, /if \(simpleRelease\) \{\s*commitAim\(\{ x: screenToLaunchX/);
+  assert.doesNotMatch(page, /releaseArmed: simpleRelease && \(nearCup/);
 });
 
 test('the art lane and all sprite sources retain their canonical dimensions', () => {

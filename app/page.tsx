@@ -650,7 +650,7 @@ export default function Home() {
         startedAt: now,
         lastX: x, lastY: y,
         positionLocked: mode === 'direct' && active.straightStabilizer && active.straightLockDistance <= 0,
-        releaseArmed: simpleRelease && (nearCup || y >= rect.height * 0.62),
+        releaseArmed: simpleRelease,
         cancelled: false,
         samples: [{ y, t: now }] };
       if (mode === 'direct') commitAim({ x: screenToLaunchX(x, rect), angle: 0, locked: false });
@@ -673,7 +673,6 @@ export default function Home() {
       const upward = gesture.originY - y;
       const horizontal = x - gesture.originX;
       if (simpleRelease) {
-        if (Math.abs(horizontal) >= 3) gesture.releaseArmed = true;
         if (y - gesture.originY >= SIMPLE_RELEASE_CANCEL_PX) gesture.cancelled = true;
       }
       if (gesture.mode === 'position-or-throw') {
@@ -692,7 +691,9 @@ export default function Home() {
           setPowerPreview(0);
           return;
         }
-        if (!active.straightStabilizer || !gesture.positionLocked) {
+        if (simpleRelease) {
+          commitAim({ x: screenToLaunchX(x, rect), angle: 0, locked: false });
+        } else if (!active.straightStabilizer || !gesture.positionLocked) {
           commitAim({ x: screenToLaunchX(x, rect), angle: 0, locked: false });
           if (active.straightStabilizer && upward >= active.straightLockDistance) gesture.positionLocked = true;
         }
@@ -826,9 +827,9 @@ export default function Home() {
     reset(settingsRef.current);
   }, [reset]);
 
-  const visualModeLabel = settings.visualMode === 'art' ? '美術 5.5' : settings.visualMode === 'realtime3d' ? '即時 3D' : '陽春';
+  const visualModeLabel = settings.visualMode === 'art' ? '美術 5.6' : settings.visualMode === 'realtime3d' ? '即時 3D' : '陽春';
 
-  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.5">
+  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.6">
     <header className="hud">
       <div className="score-main hud-tile"><small>分數</small><strong>{score.toLocaleString()}</strong><em>最高 {best.toLocaleString()}・零復活 {bestClean.toLocaleString()}</em></div>
       <div className="orders hud-tile"><small>訂單</small><b>{orders}</b><em>累積 {lifetimeOrders}</em></div>
@@ -902,10 +903,10 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
       <div className="setting-group">
         <Toggle title="動態危險線" note="未融合會推進，融合與訂單會退回" value={settings.dynamicDanger} onChange={(value) => patch({ dynamicDanger: value })}/>
         <Toggle title="角度瞄準" note="杯身水平移動；拖曳預測線調角度；二次前滑投擲" value={settings.angle} onChange={(value) => patch({ angle: value })}/>
-        <Toggle title="動態防手抖" note="直線模式達到距離後，隱形固定發射起點" value={settings.straightStabilizer} onChange={(value) => patch({ straightStabilizer: value })}/>
+        <Toggle title="動態防手抖" note="作用於前滑與力度模式；簡易放手模式會持續跟隨手指" value={settings.straightStabilizer} onChange={(value) => patch({ straightStabilizer: value })}/>
         {settings.straightStabilizer && <Slider title="防手抖觸發距離" value={settings.straightLockDistance} min={0} max={40} step={1} unit="px" onChange={(value) => patch({ straightLockDistance: value })}/>}
         <Toggle title="力度控制" note="滑動距離 70%＋末段速度 30%，角度不受出手微操影響" value={settings.power} onChange={(value) => patch({ power: value })}/>
-        {!settings.angle && !settings.power && <Toggle title="簡易放手發射" note="左右定位後放手直射；向下拖曳可取消" value={settings.simpleReleaseLaunch} onChange={(value) => patch({ simpleReleaseLaunch: value })}/>}
+        {!settings.angle && !settings.power && <Toggle title="簡易放手發射" note="跑道任意位置皆可左右定位；放手直射，向下拖曳取消" value={settings.simpleReleaseLaunch} onChange={(value) => patch({ simpleReleaseLaunch: value })}/>}
         <Toggle title="顯示杯子等級" note="在杯身顯示 1～7" value={settings.levels} onChange={(value) => patch({ levels: value })}/>
         <Toggle title="杯口辨識光環" note="協助辨認被前排遮住的杯子，可自由關閉" value={settings.occlusionCues} onChange={(value) => patch({ occlusionCues: value })}/>
         <Toggle title="顯示反彈路徑" note="以跑道尺寸、斜坡與反彈參數預測" value={settings.bounces} onChange={(value) => patch({ bounces: value })}/>
@@ -917,7 +918,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(value) => patch({ throwThreshold: value })}/>
       </div>
       <details className="developer"><summary>開發者專區 <span>即時調整 V5 物理手感</span></summary>
-        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.5 預設</button></div>
+        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.6 預設</button></div>
         <Toggle title="顯示碰撞骨架" note="將杯身、護欄、跑道與前牆疊在美術畫面上檢查對位" value={settings.debugHitboxes} onChange={(value) => patch({ debugHitboxes: value })}/>
         <Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(value) => patch({ maxAngle: value })}/>
         <Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(value) => patch({ fixedSpeed: value })}/>
@@ -940,7 +941,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="危險線深入比例" value={settings.dangerPenetration} min={0.1} max={0.8} step={0.02} onChange={(value) => patch({ dangerPenetration: value })}/>
         <Slider title="高速回收門檻" value={settings.returnSpeed} min={0.2} max={4} step={0.1} onChange={(value) => patch({ returnSpeed: value })}/>
         {settings.visualMode === 'art'
-          ? <p className="art-camera-note">精緻模式使用 V5.5 接地校正與固定攝影機；碰撞骨架只會在開發者檢查時顯示。</p>
+          ? <p className="art-camera-note">精緻模式以背景原始比例鎖定 3D 投影；碰撞骨架只會在開發者檢查時顯示。</p>
           : (
             <Slider title="攝影機高度" value={settings.cameraHeight} min={9.5} max={16} step={0.1} onChange={(value) => patch({ cameraHeight: value })}/>
           )}

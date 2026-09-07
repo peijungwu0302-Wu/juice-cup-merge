@@ -1,6 +1,6 @@
 'use client';
 
-import { Billboard, useGLTF, useTexture } from '@react-three/drei';
+import { useGLTF, useTexture } from '@react-three/drei';
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import {
@@ -158,7 +158,6 @@ function ArtCup({
   const spriteWidth = contentWorldWidth * image.width / contentWidth;
   const spriteHeight = contentWorldHeight * image.height / contentHeight;
   const bottomPaddingWorld = spriteHeight * footInset / image.height;
-  const spriteCenterY = spriteHeight / 2 - bottomPaddingWorld;
   const groundRotation: [number, number, number] = [-Math.PI / 2 - laneAngle(slope), 0, 0];
 
   useEffect(() => () => texture.dispose(), [texture]);
@@ -174,12 +173,9 @@ function ArtCup({
         <meshBasicMaterial map={ambientShadow} transparent opacity={0.2} depthWrite={false} toneMapped={false}/>
       </mesh>
     </>}
-    <Billboard follow lockX lockZ>
-      <mesh position={[0, spriteCenterY, 0]} renderOrder={6}>
-        <planeGeometry args={[spriteWidth, spriteHeight]}/>
-        <meshBasicMaterial map={texture} transparent alphaTest={0.018} depthWrite depthTest toneMapped={false} side={THREE.DoubleSide}/>
-      </mesh>
-    </Billboard>
+    <sprite position={[0, -bottomPaddingWorld, 0]} scale={[spriteWidth, spriteHeight, 1]} center={[0.5, 0]} renderOrder={6}>
+      <spriteMaterial map={texture} transparent alphaTest={0.018} depthWrite depthTest toneMapped={false}/>
+    </sprite>
   </group>;
 }
 

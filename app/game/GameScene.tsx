@@ -74,6 +74,12 @@ function CameraRig({ height, visualMode, onCamera }: { height: number; visualMod
     camera.fov = artMode
       ? ART_ASSET.lane.portraitFov
       : size.width / Math.max(1, size.height) < 0.7 ? 45 : 39;
+    // The art background is stretched to the playfield. Keeping the same
+    // reference projection makes the invisible 3D world stretch identically
+    // instead of narrowing independently on wider phone screens.
+    camera.aspect = artMode
+      ? ART_ASSET.lane.referenceAspect
+      : size.width / Math.max(1, size.height);
     camera.near = 0.1;
     camera.far = 80;
     camera.lookAt(...(artMode ? artTarget : [0, -0.1, -1] as [number, number, number]));

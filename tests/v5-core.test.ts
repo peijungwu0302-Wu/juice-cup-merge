@@ -22,7 +22,7 @@ const settings = (patch: Partial<Settings> = {}): Settings => ({
 });
 
 test('V5 ships with the approved default presentation and throw values', () => {
-  assert.equal(ASSET_VERSION, '5.5.0');
+  assert.equal(ASSET_VERSION, '5.6.0');
   assert.equal(DEFAULTS.theme, 'premiumJuice');
   assert.equal(DEFAULTS.visualMode, 'art');
   assert.equal(DEFAULTS.dynamicDanger, false);
