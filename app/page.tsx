@@ -796,9 +796,9 @@ export default function Home() {
     reset(settingsRef.current);
   }, [reset]);
 
-  const visualModeLabel = settings.visualMode === 'art' ? '美術 5.2' : settings.visualMode === 'realtime3d' ? '即時 3D' : '陽春';
+  const visualModeLabel = settings.visualMode === 'art' ? '美術 5.3' : settings.visualMode === 'realtime3d' ? '即時 3D' : '陽春';
 
-  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.2">
+  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.3">
     <header className="hud">
       <div className="score-main hud-tile"><small>分數</small><strong>{score.toLocaleString()}</strong><em>最高 {best.toLocaleString()}・零復活 {bestClean.toLocaleString()}</em></div>
       <div className="orders hud-tile"><small>訂單</small><b>{orders}</b><em>累積 {lifetimeOrders}</em></div>
@@ -886,7 +886,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(value) => patch({ throwThreshold: value })}/>
       </div>
       <details className="developer"><summary>開發者專區 <span>即時調整 V5 物理手感</span></summary>
-        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.2 預設</button></div>
+        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.3 預設</button></div>
         <Toggle title="顯示碰撞骨架" note="將杯身、護欄、跑道與前牆疊在美術畫面上檢查對位" value={settings.debugHitboxes} onChange={(value) => patch({ debugHitboxes: value })}/>
         <Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(value) => patch({ maxAngle: value })}/>
         <Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(value) => patch({ fixedSpeed: value })}/>
@@ -909,7 +909,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="危險線深入比例" value={settings.dangerPenetration} min={0.1} max={0.8} step={0.02} onChange={(value) => patch({ dangerPenetration: value })}/>
         <Slider title="高速回收門檻" value={settings.returnSpeed} min={0.2} max={4} step={0.1} onChange={(value) => patch({ returnSpeed: value })}/>
         {settings.visualMode === 'art'
-          ? <p className="art-camera-note">精緻預渲染使用固定美術攝影機，確保護欄、前牆與碰撞位置一致。</p>
+          ? <p className="art-camera-note">精緻模式使用等比例背景與固定美術攝影機；金色內緣就是實際護欄與前牆碰撞位置。</p>
           : (
             <Slider title="攝影機高度" value={settings.cameraHeight} min={9.5} max={16} step={0.1} onChange={(value) => patch({ cameraHeight: value })}/>
           )}

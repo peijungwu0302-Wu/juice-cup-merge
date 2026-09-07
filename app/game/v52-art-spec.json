@@ -1,14 +1,17 @@
 {
-  "version": "5.2.0",
+  "version": "5.3.0",
   "lane": {
     "image": "/assets/lane-premium-v1.png",
     "sourceWidth": 862,
     "sourceHeight": 1825,
-    "cameraHeight": 12,
-    "portraitFov": 45,
-    "wideFov": 39,
-    "farGuide": { "z": -9.8, "leftX": 0.292, "rightX": 0.708, "y": 0.318 },
-    "nearGuide": { "z": 9.8, "leftX": 0.044, "rightX": 0.956, "y": 0.972 }
+    "referenceAspect": 0.472329,
+    "cameraPosition": [0, 12.9, 17.6],
+    "cameraTarget": [0, -0.8, -0.3],
+    "portraitFov": 45.2,
+    "depthIncrease": 0.118,
+    "farGuide": { "z": -9.8, "leftX": 0.2594, "rightX": 0.7406, "y": 0.2399 },
+    "midGuide": { "z": 0, "leftX": 0.1736, "rightX": 0.8264, "y": 0.4751 },
+    "nearGuide": { "z": 9.8, "leftX": -0.0074, "rightX": 1.0074, "y": 0.971 }
   },
   "sprite": {
     "padding": 24,
