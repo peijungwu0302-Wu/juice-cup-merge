@@ -17,6 +17,7 @@ import {
   AimState,
   ART_ASSET,
   BurstState,
+  CUP_COLLIDER_RADIUS_RATIO,
   CUP_COLLIDER_SLICES,
   CupState,
   GraphicsQuality,
@@ -224,6 +225,16 @@ function LanePhysics({ settings }: { settings: Settings }) {
       restitution={settings.wallRest}
       restitutionCombineRule={3}
     />
+    {/* Tall catch rails sit just behind the visible rails. They do not change
+        ordinary bounces, but stop a crowded or blasted cup climbing outside. */}
+    {[-1, 1].map((side) => <CuboidCollider
+      key={`safety-${side}`}
+      args={[LANE_ASSET.safetyRailWidth / 2, LANE_ASSET.safetyRailHeight / 2, LANE_ASSET.length / 2 + 0.2]}
+      position={[side * LANE_ASSET.safetyRailCenterX, LANE_ASSET.safetyRailCenterY, 0]}
+      friction={settings.laneFriction}
+      restitution={Math.min(0.24, settings.wallRest)}
+      restitutionCombineRule={1}
+    />)}
     <CuboidCollider
       args={[LANE_ASSET.railWidth / 2, LANE_ASSET.railHeight / 2, LANE_ASSET.length / 2 + 0.15]}
       position={[LANE_ASSET.railCenterX, 0.25, 0]}
@@ -459,10 +470,12 @@ function PhysicsMonitor({
   safeUntilRef,
   onGameOver,
   onRecycle,
+  onCupCollision,
   active,
-}: Pick<SceneProps, 'cupsRef' | 'bodyMapRef' | 'contactsRef' | 'settings' | 'dangerLine' | 'safeUntilRef' | 'onGameOver' | 'onRecycle'> & { active: boolean }) {
+}: Pick<SceneProps, 'cupsRef' | 'bodyMapRef' | 'contactsRef' | 'settings' | 'dangerLine' | 'safeUntilRef' | 'onGameOver' | 'onRecycle' | 'onCupCollision'> & { active: boolean }) {
   const triggeredRef = useRef(false);
   const recycleGuard = useRef(new Set<number>());
+  const contactRetryMsRef = useRef(0);
   useEffect(() => {
     if (active) triggeredRef.current = false;
   }, [active]);
@@ -470,6 +483,18 @@ function PhysicsMonitor({
   useFrame((_, delta) => {
     if (!active) return;
     const deltaMs = Math.min(50, delta * 1000);
+    contactRetryMsRef.current += deltaMs;
+    const retryLockedContacts = contactRetryMsRef.current >= 80;
+    if (retryLockedContacts) contactRetryMsRef.current = 0;
+    const colliderOwners = new Map<number, number>();
+    if (retryLockedContacts) {
+      for (const [cupId, body] of bodyMapRef.current) {
+        for (let index = 0; index < body.numColliders(); index += 1) {
+          colliderOwners.set(body.collider(index).handle, cupId);
+        }
+      }
+    }
+    let retriedPair = false;
     let shouldEnd = false;
     for (const cup of cupsRef.current) {
       const body = bodyMapRef.current.get(cup.id);
@@ -485,6 +510,16 @@ function PhysicsMonitor({
       cup.ageMs += deltaMs;
       cup.mergeLockMs = Math.max(0, cup.mergeLockMs - deltaMs);
       const radius = cupRadius(cup.level, settings);
+      const maximumCenterX = LANE_HALF - radius * CUP_COLLIDER_RADIUS_RATIO - 0.01;
+      if (Math.abs(position.x) > maximumCenterX + 0.08) {
+        const correctedX = Math.sign(position.x || 1) * maximumCenterX;
+        body.setTranslation({ x: correctedX, y: position.y, z: position.z }, true);
+        body.setLinvel({ x: -velocity.x * 0.24, y: Math.min(velocity.y, 0.05), z: velocity.z * 0.96 }, true);
+        position.x = correctedX;
+        velocity.x *= -0.24;
+        velocity.y = Math.min(velocity.y, 0.05);
+        velocity.z *= 0.96;
+      }
       const planarSpeed = Math.hypot(velocity.x, velocity.z);
       const spatialSpeed = Math.hypot(velocity.x, velocity.y, velocity.z);
       const contactSet = contactsRef.current.get(cup.id);
@@ -494,6 +529,14 @@ function PhysicsMonitor({
         for (const token of contactSet) {
           if (token < 0) {
             hasCupContact = true;
+            if (retryLockedContacts && !retriedPair && cup.mergeLockMs <= 0) {
+              const otherId = colliderOwners.get(-token - 1);
+              const other = otherId === undefined ? undefined : cupsRef.current.find((candidate) => candidate.id === otherId);
+              if (other && other.id !== cup.id && other.level === cup.level && other.mergeLockMs <= 0) {
+                retriedPair = true;
+                onCupCollision(cup.id, other.id);
+              }
+            }
             break;
           }
         }
@@ -572,7 +615,8 @@ function World({ props }: { props: SceneProps }) {
             (props.cups.length <= 28 || index >= props.cups.length - 18))}/>) }
         <PhysicsMonitor cupsRef={props.cupsRef} bodyMapRef={props.bodyMapRef} contactsRef={props.contactsRef}
           settings={props.settings} dangerLine={props.dangerLine} safeUntilRef={props.safeUntilRef}
-          onGameOver={props.onGameOver} onRecycle={props.onRecycle} active={!props.paused && !props.gameOver}/>
+          onGameOver={props.onGameOver} onRecycle={props.onRecycle} onCupCollision={props.onCupCollision}
+          active={!props.paused && !props.gameOver}/>
       </Physics>
       <PredictionLines cups={props.cups} aim={props.aim} nextLevel={props.nextLevel} settings={props.settings}/>
       <AimHandle aim={props.aim} settings={props.settings}/>

@@ -182,6 +182,7 @@ export const BASE_CUP_RADIUS = 0.46;
 export const CUP_MODEL_RADIUS = V51_ASSET_SPEC.cup.modelRadius;
 export const CUP_MODEL_HEIGHT = V51_ASSET_SPEC.cup.modelHeight;
 export const CUP_COLLIDER_SLICES = V51_ASSET_SPEC.cup.colliderSlices;
+export const CUP_COLLIDER_RADIUS_RATIO = Math.max(...CUP_COLLIDER_SLICES.map((slice) => slice.radius));
 export const LANE_ASSET = V51_ASSET_SPEC.lane;
 export const ART_ASSET = V52_ART_SPEC;
 export const SPEED_TO_WORLD = 1.55;

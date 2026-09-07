@@ -1,7 +1,7 @@
 {
-  "version": "5.6.0",
+  "version": "5.7.0",
   "lane": {
-    "image": "/assets/lane-premium-v54.png",
+    "image": "/assets/lane-premium-v57.png",
     "sourceWidth": 862,
     "sourceHeight": 1658,
     "referenceAspect": 0.519903,

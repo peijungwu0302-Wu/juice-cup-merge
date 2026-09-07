@@ -1,7 +1,7 @@
 'use client';
 
 import { useGLTF, useTexture } from '@react-three/drei';
-import { useEffect, useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import * as THREE from 'three';
 import {
   CUP_MODEL_HEIGHT,
@@ -60,6 +60,19 @@ function glassMaterial(premium: boolean, quality: GraphicsQuality) {
 
 const levelTextures = new Map<number, THREE.CanvasTexture>();
 const artShadowTextures = new Map<'contact' | 'ambient', THREE.CanvasTexture>();
+const configuredArtTextures = new WeakSet<THREE.Texture>();
+
+function configureArtTexture(texture: THREE.Texture) {
+  if (!configuredArtTextures.has(texture)) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    texture.needsUpdate = true;
+    configuredArtTextures.add(texture);
+  }
+  return texture;
+}
 
 function getArtShadowTexture(kind: 'contact' | 'ambient') {
   const cached = artShadowTextures.get(kind);
@@ -130,15 +143,9 @@ function ArtCup({
   preview: boolean;
 }) {
   const sourceTexture = useTexture(artSpritePath(theme, level));
-  const texture = useMemo(() => {
-    const configured = sourceTexture.clone();
-    configured.colorSpace = THREE.SRGBColorSpace;
-    configured.minFilter = THREE.LinearMipmapLinearFilter;
-    configured.magFilter = THREE.LinearFilter;
-    configured.generateMipmaps = true;
-    configured.needsUpdate = true;
-    return configured;
-  }, [sourceTexture]);
+  // useTexture already caches by URL. Sharing that GPU texture prevents every
+  // merge from cloning, uploading, and mipmapping the same cup art again.
+  const texture = useMemo(() => configureArtTexture(sourceTexture), [sourceTexture]);
   const contactShadow = useMemo(() => getArtShadowTexture('contact'), []);
   const ambientShadow = useMemo(() => getArtShadowTexture('ambient'), []);
   const kind = kindForTheme(theme);
@@ -160,8 +167,6 @@ function ArtCup({
   const bottomPaddingWorld = spriteHeight * footInset / image.height;
   const groundRotation: [number, number, number] = [-Math.PI / 2 - laneAngle(slope), 0, 0];
 
-  useEffect(() => () => texture.dispose(), [texture]);
-
   return <group>
     {!preview && <>
       <mesh position={[0, -0.026, radius * 0.04]} rotation={groundRotation} renderOrder={1}>
@@ -173,6 +178,8 @@ function ArtCup({
         <meshBasicMaterial map={ambientShadow} transparent opacity={0.2} depthWrite={false} toneMapped={false}/>
       </mesh>
     </>}
+    {/* A Three Sprite is camera-facing by construction. The Rapier body may
+        keep its physical yaw while the premium art always shows one intact face. */}
     <sprite position={[0, -bottomPaddingWorld, 0]} scale={[spriteWidth, spriteHeight, 1]} center={[0.5, 0]} renderOrder={6}>
       <spriteMaterial map={texture} transparent alphaTest={0.018} depthWrite depthTest toneMapped={false}/>
     </sprite>
@@ -259,7 +266,7 @@ function PremiumCup({
     : <SimpleCup theme={simpleTheme} level={level} radius={radius} height={height} quality={quality} preview={preview}/>;
 }
 
-export function CupModel3D({
+export const CupModel3D = memo(function CupModel3D({
   theme,
   level,
   radius,
@@ -299,7 +306,12 @@ export function CupModel3D({
     </mesh>}
     {showLevel && <LevelBadge level={level} height={height} radius={radius}/>}
   </group>;
-}
+});
 
 useGLTF.preload('/models/cups-v51.glb');
 useGLTF.preload('/models/cups-v5.glb');
+for (const kind of ['juice', 'sundae', 'wine'] as const) {
+  for (let level = 0; level < LEVELS.length; level += 1) {
+    useTexture.preload(`/art-v52/${kind}-${level + 1}.png`);
+  }
+}

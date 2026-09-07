@@ -27,6 +27,10 @@ function buildWorld() {
   world.createCollider(collider(RAPIER.ColliderDesc.cuboid(HALF_WIDTH, lane.surfaceThickness / 2, HALF_LENGTH).setTranslation(0, -lane.surfaceThickness / 2, 0), 0));
   world.createCollider(collider(RAPIER.ColliderDesc.cuboid(lane.railWidth / 2, lane.railHeight / 2, HALF_LENGTH + 0.15).setTranslation(-lane.railCenterX, 0.25, 0), 0.91));
   world.createCollider(collider(RAPIER.ColliderDesc.cuboid(lane.railWidth / 2, lane.railHeight / 2, HALF_LENGTH + 0.15).setTranslation(lane.railCenterX, 0.25, 0), 0.91));
+  for (const side of [-1, 1]) {
+    world.createCollider(collider(RAPIER.ColliderDesc.cuboid(lane.safetyRailWidth / 2, lane.safetyRailHeight / 2, HALF_LENGTH + 0.2)
+      .setTranslation(side * lane.safetyRailCenterX, lane.safetyRailCenterY, 0), 0.24));
+  }
   world.createCollider(collider(RAPIER.ColliderDesc.cuboid(lane.frontWallWidth / 2, lane.frontWallHeight / 2, lane.frontWallDepth / 2).setTranslation(0, lane.frontWallCenterY, lane.frontWallCenterZ), 0.12));
   world.createCollider(collider(RAPIER.ColliderDesc.cuboid(3.15, 0.3, 0.18).setTranslation(0, 0.1, lane.nearBumperCenterZ), 0.04));
   return world;
@@ -62,6 +66,24 @@ test('continuous collision detection keeps a fast throw between the physical rai
     assert.ok(Number.isFinite(cup.translation().z));
   }
   assert.ok(reflected, 'the cup should hit and reflect from a side rail');
+  world.free();
+});
+
+test('the invisible upper rail catches a cup that rises above the visible wooden rail', () => {
+  const world = buildWorld();
+  const cup = addCup(world, 2.1, 0);
+  cup.setTranslation({ x: 2.1, y: 0.82, z: 0 }, true);
+  cup.setLinvel({ x: 13, y: 1.6, z: 0 }, true);
+  let maximumX = 0;
+  let reflected = false;
+  for (let step = 0; step < 180; step += 1) {
+    world.step();
+    maximumX = Math.max(maximumX, cup.translation().x);
+    if (cup.linvel().x < -0.2) reflected = true;
+  }
+  assert.ok(reflected, 'the raised cup should reflect from the hidden catch rail');
+  const catchLimit = ASSET_SPEC.lane.safetyRailCenterX - ASSET_SPEC.lane.safetyRailWidth / 2 - RADIUS * 0.985 + 0.12;
+  assert.ok(maximumX < catchLimit, `raised cup escaped to x=${maximumX}`);
   world.free();
 });
 

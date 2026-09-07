@@ -8,7 +8,7 @@ const asset = (path) => new URL(path, root);
 const spec = JSON.parse(readFileSync(asset('app/game/v52-art-spec.json'), 'utf8'));
 const laneSpec = JSON.parse(readFileSync(asset('app/game/v51-asset-spec.json'), 'utf8')).lane;
 
-test('V5.6 retains 21 isolated, transparent, mobile-budgeted art sprites with per-cup foot anchors', () => {
+test('V5.7 retains 21 isolated, transparent, mobile-budgeted art sprites with per-cup foot anchors', () => {
   let total = 0;
   for (const kind of ['juice', 'sundae', 'wine']) {
     assert.equal(spec.sprite.themes[kind].bounds.length, 7);
@@ -26,7 +26,7 @@ test('V5.6 retains 21 isolated, transparent, mobile-budgeted art sprites with pe
     }
   }
   assert.ok(total < 3_800_000, `art sprites total ${total} bytes`);
-  assert.equal(spec.version, '5.6.0');
+  assert.equal(spec.version, '5.7.0');
 });
 
 const artCamera = () => {
@@ -83,7 +83,7 @@ test('art mode uses one seamless background and no runtime rail overlay', () => 
   const scene = readFileSync(asset('app/game/GameScene.tsx'), 'utf8');
   const styles = readFileSync(asset('app/globals.css'), 'utf8');
   assert.doesNotMatch(scene, /ArtLaneFrame/);
-  assert.equal(styles.match(/lane-premium-v54\.png/g)?.length, 1);
+  assert.equal(styles.match(/lane-premium-v57\.png/g)?.length, 1);
   assert.match(styles, /background-size: 100% 100%/);
 });
 
@@ -94,6 +94,17 @@ test('art cups retain their original billboard proportions with two ground-conta
   assert.match(model, /getArtShadowTexture\('contact'\)/);
   assert.match(model, /getArtShadowTexture\('ambient'\)/);
   assert.match(model, /footInsets/);
+  assert.doesNotMatch(model, /sourceTexture\.clone\(\)/);
+  assert.doesNotMatch(model, /texture\.dispose\(\)/);
+  assert.match(model, /useTexture\.preload/);
+});
+
+test('locked same-level contacts are retried and escaped cups are recovered inside the lane', () => {
+  const scene = readFileSync(asset('app/game/GameScene.tsx'), 'utf8');
+  assert.match(scene, /contactRetryMsRef\.current >= 80/);
+  assert.match(scene, /onCupCollision\(cup\.id, other\.id\)/);
+  assert.match(scene, /maximumCenterX = LANE_HALF - radius \* CUP_COLLIDER_RADIUS_RATIO/);
+  assert.match(scene, /safetyRailHeight/);
 });
 
 test('simple release uses the whole playfield and bypasses straight-mode position locking', () => {
