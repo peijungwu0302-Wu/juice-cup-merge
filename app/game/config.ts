@@ -1,3 +1,6 @@
+import V51_ASSET_SPEC from './v51-asset-spec.json';
+import V52_ART_SPEC from './v52-art-spec.json';
+
 export const LEVELS = [
   { name: '檸檬露', color: '#f4cf35', dark: '#a96608', accent: '#fff0a3' },
   { name: '蜜柑汁', color: '#ff8d27', dark: '#c9480a', accent: '#ffd18b' },
@@ -25,6 +28,7 @@ export type Theme =
   | 'premiumWine'
   | 'simpleWine';
 export type GraphicsQuality = 'eco' | 'balanced' | 'cinematic';
+export type VisualMode = 'art' | 'realtime3d' | 'simple';
 
 export type Settings = {
   angle: boolean;
@@ -33,6 +37,7 @@ export type Settings = {
   occlusionCues: boolean;
   dynamicDanger: boolean;
   theme: Theme;
+  visualMode: VisualMode;
   quality: GraphicsQuality;
   aimLength: number;
   bounces: boolean;
@@ -79,6 +84,7 @@ export const DEFAULTS: Settings = {
   occlusionCues: true,
   dynamicDanger: false,
   theme: 'premiumJuice',
+  visualMode: 'art',
   quality: 'balanced',
   aimLength: 2000,
   bounces: true,
@@ -160,7 +166,7 @@ export type GameSnapshot = {
   luckyCooldown: number;
 };
 
-export const ASSET_VERSION = V51_ASSET_SPEC.version;
+export const ASSET_VERSION = V52_ART_SPEC.version;
 export const LANE_WIDTH = V51_ASSET_SPEC.lane.width;
 export const LANE_HALF = LANE_WIDTH / 2;
 export const LANE_LENGTH = V51_ASSET_SPEC.lane.length;
@@ -175,6 +181,7 @@ export const CUP_MODEL_RADIUS = V51_ASSET_SPEC.cup.modelRadius;
 export const CUP_MODEL_HEIGHT = V51_ASSET_SPEC.cup.modelHeight;
 export const CUP_COLLIDER_SLICES = V51_ASSET_SPEC.cup.colliderSlices;
 export const LANE_ASSET = V51_ASSET_SPEC.lane;
+export const ART_ASSET = V52_ART_SPEC;
 export const SPEED_TO_WORLD = 1.55;
 export const LEGACY_TO_WORLD = LANE_LENGTH / 640;
 export const STORAGE_KEY = 'juice-v5-settings';
@@ -186,6 +193,14 @@ export const kindForTheme = (theme: Theme): CupKind =>
   theme.includes('Sundae') ? 'sundae' : theme.includes('Wine') ? 'wine' : 'juice';
 
 export const isPremiumTheme = (theme: Theme) => theme.startsWith('premium');
+
+export const themeFor = (kind: CupKind, visualMode: VisualMode): Theme => {
+  const suffix = kind === 'juice' ? 'Juice' : kind === 'sundae' ? 'Sundae' : 'Wine';
+  return `${visualMode === 'simple' ? 'simple' : 'premium'}${suffix}` as Theme;
+};
+
+export const artSpritePath = (theme: Theme, level: number) =>
+  `/art-v52/${kindForTheme(theme)}-${clamp(Math.round(level), 0, LEVELS.length - 1) + 1}.png`;
 
 export const levelName = (theme: Theme, level: number) =>
   THEME_LEVEL_NAMES[kindForTheme(theme)][level] ?? LEVELS[level]?.name ?? '';
@@ -219,5 +234,3 @@ export const cloneCup = (cup: CupState): CupState => ({
   rotation: [...cup.rotation],
   angularVelocity: [...cup.angularVelocity],
 });
-import V51_ASSET_SPEC from './v51-asset-spec.json';
-

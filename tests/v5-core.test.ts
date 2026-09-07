@@ -22,8 +22,9 @@ const settings = (patch: Partial<Settings> = {}): Settings => ({
 });
 
 test('V5 ships with the approved default presentation and throw values', () => {
-  assert.equal(ASSET_VERSION, '5.1.0');
+  assert.equal(ASSET_VERSION, '5.2.0');
   assert.equal(DEFAULTS.theme, 'premiumJuice');
+  assert.equal(DEFAULTS.visualMode, 'art');
   assert.equal(DEFAULTS.dynamicDanger, false);
   assert.equal(DEFAULTS.straightStabilizer, true);
   assert.equal(DEFAULTS.straightLockDistance, 3);
@@ -49,6 +50,17 @@ test('V5 keeps visual and physical sizes independent from the selected theme', (
     assert.equal(cupRadius(level, juice), cupRadius(level, sundae));
     assert.equal(cupRadius(level, juice), cupRadius(level, wine));
     assert.equal(cupHeight(level, juice), cupHeight(level, wine));
+  }
+});
+
+test('switching renderers cannot change a cup collider or physical size', () => {
+  for (const visualMode of ['art', 'realtime3d', 'simple'] as const) {
+    const active = settings({ visualMode });
+    for (let level = 0; level < 7; level += 1) {
+      assert.equal(cupRadius(level, active), cupRadius(level, settings({ visualMode: 'art' })));
+      assert.equal(cupHeight(level, active), cupHeight(level, settings({ visualMode: 'art' })));
+    }
+    assert.deepEqual(CUP_COLLIDER_SLICES, settings({ visualMode }).visualMode && CUP_COLLIDER_SLICES);
   }
 });
 
@@ -127,6 +139,14 @@ test('saved settings are migrated without allowing invalid physics values', () =
   assert.equal(migrated.solverIterations, 9);
   assert.equal(migrated.ccdSubsteps, 4);
   assert.deepEqual(migrated.levelSizes, [1, 1, 2, 3, 3.8, 3.8, 3.8]);
+});
+
+test('legacy simple themes migrate to the simple renderer without changing gameplay defaults', () => {
+  const migrated = normalizeSettings({ theme: 'simpleWine' });
+  assert.equal(migrated.visualMode, 'simple');
+  assert.equal(migrated.theme, 'simpleWine');
+  assert.equal(migrated.wallRest, DEFAULTS.wallRest);
+  assert.equal(migrated.size, DEFAULTS.size);
 });
 
 test('game over requires a stable cup pile rather than a lone rebound', () => {

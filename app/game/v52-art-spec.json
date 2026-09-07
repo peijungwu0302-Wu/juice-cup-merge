@@ -1,0 +1,40 @@
+{
+  "version": "5.2.0",
+  "lane": {
+    "image": "/assets/lane-premium-v1.png",
+    "sourceWidth": 862,
+    "sourceHeight": 1825,
+    "cameraHeight": 12,
+    "portraitFov": 45,
+    "wideFov": 39,
+    "farGuide": { "z": -9.8, "leftX": 0.292, "rightX": 0.708, "y": 0.318 },
+    "nearGuide": { "z": 9.8, "leftX": 0.044, "rightX": 0.956, "y": 0.972 }
+  },
+  "sprite": {
+    "padding": 24,
+    "heightCap": 1.55,
+    "themes": {
+      "juice": {
+        "source": "public/assets/cups-juice-premium-v3.png",
+        "sourceWidth": 2118,
+        "sourceHeight": 742,
+        "bodyRatios": [0.84, 0.78, 0.8, 0.86, 0.86, 0.78, 0.84],
+        "bounds": [[41, 319, 267, 650], [317, 258, 584, 651], [608, 325, 855, 651], [883, 311, 1145, 651], [1171, 296, 1419, 652], [1459, 268, 1774, 652], [1795, 262, 2088, 657]]
+      },
+      "sundae": {
+        "source": "public/assets/cups-sundae-premium-v3.png",
+        "sourceWidth": 1794,
+        "sourceHeight": 877,
+        "bodyRatios": [0.84, 0.84, 0.84, 0.86, 0.86, 0.84, 0.86],
+        "bounds": [[21, 335, 237, 706], [262, 337, 486, 707], [505, 329, 739, 706], [756, 309, 1001, 707], [1015, 315, 1263, 710], [1270, 312, 1510, 709], [1510, 258, 1767, 710]]
+      },
+      "wine": {
+        "source": "public/assets/cups-wine-premium-v3.png",
+        "sourceWidth": 1774,
+        "sourceHeight": 887,
+        "bodyRatios": [0.88, 0.88, 0.88, 0.9, 0.9, 0.9, 0.94],
+        "bounds": [[20, 372, 200, 713], [242, 263, 422, 713], [467, 294, 681, 714], [725, 272, 933, 714], [974, 252, 1176, 714], [1206, 242, 1413, 714], [1443, 241, 1757, 715]]
+      }
+    }
+  }
+}

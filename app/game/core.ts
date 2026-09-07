@@ -13,6 +13,7 @@ import {
   Settings,
   SPAWN_Z,
   Theme,
+  VisualMode,
   clamp,
   cupRadius,
   laneAngle,
@@ -21,6 +22,7 @@ import {
 
 const THEMES: Theme[] = ['premiumJuice', 'simpleJuice', 'premiumSundae', 'simpleSundae', 'premiumWine', 'simpleWine'];
 const QUALITIES: GraphicsQuality[] = ['eco', 'balanced', 'cinematic'];
+const VISUAL_MODES: VisualMode[] = ['art', 'realtime3d', 'simple'];
 
 const bounded = (value: unknown, fallback: number, minimum: number, maximum: number) => {
   if (value === null || value === '') return clamp(fallback, minimum, maximum);
@@ -32,6 +34,9 @@ const booleanOr = (value: unknown, fallback: boolean) => typeof value === 'boole
 
 export function normalizeSettings(stored: Partial<Settings> | null): Settings {
   const merged = { ...DEFAULTS, ...(stored ?? {}) };
+  const visualMode = stored?.visualMode && VISUAL_MODES.includes(stored.visualMode)
+    ? stored.visualMode
+    : stored?.theme?.startsWith('simple') ? 'simple' : DEFAULTS.visualMode;
   const minPower = bounded(merged.minPower, DEFAULTS.minPower, 4.5, 20);
   const requestedMaximum = bounded(merged.maxPower, DEFAULTS.maxPower, 6, 25);
   const maxPower = Math.max(minPower + 0.1, requestedMaximum);
@@ -48,6 +53,7 @@ export function normalizeSettings(stored: Partial<Settings> | null): Settings {
     straightStabilizer: booleanOr(merged.straightStabilizer, DEFAULTS.straightStabilizer),
     debugHitboxes: booleanOr(merged.debugHitboxes, DEFAULTS.debugHitboxes),
     theme: THEMES.includes(merged.theme) ? merged.theme : DEFAULTS.theme,
+    visualMode,
     quality: QUALITIES.includes(merged.quality) ? merged.quality : DEFAULTS.quality,
     aimLength: bounded(merged.aimLength, DEFAULTS.aimLength, 0, 3000),
     straightLockDistance: bounded(merged.straightLockDistance, DEFAULTS.straightLockDistance, 0, 40),

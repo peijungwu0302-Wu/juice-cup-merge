@@ -1,7 +1,7 @@
 'use client';
 
 import { useId } from 'react';
-import { LEVELS, Theme, isPremiumTheme, kindForTheme, levelName } from './config';
+import { LEVELS, Theme, VisualMode, artSpritePath, isPremiumTheme, kindForTheme, levelName } from './config';
 
 const SUNDAE = ['#fff0c2', '#d88931', '#6fa64a', '#6a3d2f', '#6656bf', '#3d1d22', '#e68bd7'];
 const WINE = ['#bfefff', '#a78bdb', '#ef8ca6', '#395bc0', '#43a46c', '#bd274f', '#5c56d9'];
@@ -28,11 +28,29 @@ function MiniGarnish({ level, kind }: { level: number; kind: ReturnType<typeof k
   </>;
 }
 
-export function CupIcon({ level, theme, className = '' }: { level: number; theme: Theme; className?: string }) {
+export function CupIcon({
+  level,
+  theme,
+  visualMode = 'art',
+  className = '',
+}: {
+  level: number;
+  theme: Theme;
+  visualMode?: VisualMode;
+  className?: string;
+}) {
   const rawId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const kind = kindForTheme(theme);
   const premium = isPremiumTheme(theme);
-  if (premium) {
+  if (visualMode === 'art') {
+    return <span
+      className={`cup-icon rendered-cup-icon art-cup-icon ${className}`}
+      role="img"
+      aria-label={levelName(theme, level)}
+      style={{ backgroundImage: `url(${artSpritePath(theme, level)})` }}
+    />;
+  }
+  if (visualMode === 'realtime3d' && premium) {
     return <span
       className={`cup-icon rendered-cup-icon ${className}`}
       role="img"

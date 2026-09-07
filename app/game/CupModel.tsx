@@ -1,15 +1,18 @@
 'use client';
 
-import { useGLTF } from '@react-three/drei';
-import { useMemo } from 'react';
+import { useGLTF, useTexture } from '@react-three/drei';
+import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import {
   CUP_MODEL_HEIGHT,
   CUP_MODEL_RADIUS,
+  ART_ASSET,
   CupKind,
   GraphicsQuality,
   LEVELS,
   Theme,
+  VisualMode,
+  artSpritePath,
   isPremiumTheme,
   kindForTheme,
 } from './config';
@@ -55,6 +58,24 @@ function glassMaterial(premium: boolean, quality: GraphicsQuality) {
 }
 
 const levelTextures = new Map<number, THREE.CanvasTexture>();
+let artShadowTexture: THREE.CanvasTexture | null = null;
+
+function getArtShadowTexture() {
+  if (artShadowTexture) return artShadowTexture;
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 64;
+  const context = canvas.getContext('2d')!;
+  const gradient = context.createRadialGradient(64, 32, 5, 64, 32, 58);
+  gradient.addColorStop(0, 'rgba(58, 28, 12, .62)');
+  gradient.addColorStop(0.48, 'rgba(77, 37, 14, .28)');
+  gradient.addColorStop(1, 'rgba(77, 37, 14, 0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 128, 64);
+  artShadowTexture = new THREE.CanvasTexture(canvas);
+  artShadowTexture.colorSpace = THREE.SRGBColorSpace;
+  return artShadowTexture;
+}
 
 function getLevelTexture(level: number) {
   if (levelTextures.has(level)) return levelTextures.get(level)!;
@@ -88,6 +109,59 @@ function LevelBadge({ level, height, radius }: { level: number; height: number; 
   return <sprite position={[0, height * 0.56, radius * 1.04]} scale={[0.5, 0.5, 0.5]} renderOrder={9}>
     <spriteMaterial map={texture} transparent depthTest={false}/>
   </sprite>;
+}
+
+function ArtCup({
+  theme,
+  level,
+  radius,
+  height,
+  preview,
+}: {
+  theme: Theme;
+  level: number;
+  radius: number;
+  height: number;
+  preview: boolean;
+}) {
+  const sourceTexture = useTexture(artSpritePath(theme, level));
+  const texture = useMemo(() => {
+    const configured = sourceTexture.clone();
+    configured.colorSpace = THREE.SRGBColorSpace;
+    configured.minFilter = THREE.LinearMipmapLinearFilter;
+    configured.magFilter = THREE.LinearFilter;
+    configured.generateMipmaps = true;
+    configured.needsUpdate = true;
+    return configured;
+  }, [sourceTexture]);
+  const shadow = useMemo(() => getArtShadowTexture(), []);
+  const kind = kindForTheme(theme);
+  const profile = ART_ASSET.sprite.themes[kind];
+  const image = texture.image as { width: number; height: number };
+  const padding = ART_ASSET.sprite.padding;
+  const contentWidth = Math.max(1, image.width - padding * 2);
+  const contentHeight = Math.max(1, image.height - padding * 2);
+  const bodyRatio = profile.bodyRatios[level] ?? profile.bodyRatios[0];
+  const contentWorldWidth = radius * 2 / bodyRatio;
+  const contentWorldHeight = Math.min(
+    contentWorldWidth * contentHeight / contentWidth,
+    height * ART_ASSET.sprite.heightCap,
+  );
+  const spriteWidth = contentWorldWidth * image.width / contentWidth;
+  const spriteHeight = contentWorldHeight * image.height / contentHeight;
+  const bottomPaddingWorld = spriteHeight * padding / image.height;
+
+  useEffect(() => () => texture.dispose(), [texture]);
+
+  return <group>
+    {!preview && <mesh position={[0, 0.018, radius * 0.22]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
+      <planeGeometry args={[radius * 3.2, radius * 1.28]}/>
+      <meshBasicMaterial map={shadow} transparent opacity={0.62} depthWrite={false} toneMapped={false}/>
+    </mesh>}
+    <sprite position={[0, -bottomPaddingWorld, 0]} scale={[spriteWidth, spriteHeight, 1]} center={[0.5, 0]} renderOrder={6}>
+      <spriteMaterial map={texture} transparent alphaTest={0.018} depthWrite depthTest toneMapped={false}/>
+    </sprite>
+  </group>;
 }
 
 function SimpleCup({
@@ -178,6 +252,7 @@ export function CupModel3D({
   showLevel,
   showHalo,
   quality,
+  visualMode,
   microDetails = true,
   preview = false,
 }: {
@@ -188,15 +263,18 @@ export function CupModel3D({
   showLevel: boolean;
   showHalo: boolean;
   quality: GraphicsQuality;
+  visualMode: VisualMode;
   microDetails?: boolean;
   preview?: boolean;
 }) {
   const kind = kindForTheme(theme);
   const premium = isPremiumTheme(theme);
   return <group>
-    {premium
-      ? <PremiumCup kind={kind} level={level} radius={radius} height={height} quality={quality} microDetails={microDetails} preview={preview}/>
-      : <SimpleCup theme={theme} level={level} radius={radius} height={height} quality={quality} preview={preview}/>
+    {visualMode === 'art'
+      ? <ArtCup theme={theme} level={level} radius={radius} height={height} preview={preview}/>
+      : visualMode === 'realtime3d' && premium
+        ? <PremiumCup kind={kind} level={level} radius={radius} height={height} quality={quality} microDetails={microDetails} preview={preview}/>
+        : <SimpleCup theme={theme} level={level} radius={radius} height={height} quality={quality} preview={preview}/>
     }
     {showHalo && <mesh position={[0, height * 1.025, 0]} rotation={[Math.PI / 2, 0, 0]} renderOrder={8}>
       <torusGeometry args={[radius * 0.92, Math.max(0.018, radius * 0.035), 8, 42]}/>

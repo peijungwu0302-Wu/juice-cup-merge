@@ -10,6 +10,7 @@ import {
   AimState,
   BurstState,
   CupState,
+  CupKind,
   DEFAULTS,
   DYNAMIC_DANGER_MIN_Z,
   DYNAMIC_DANGER_START_Z,
@@ -22,14 +23,17 @@ import {
   STORAGE_KEY,
   Settings,
   Theme,
+  VisualMode,
   clamp,
   cloneCup,
   cupHeight,
   cupRadius,
   laneSurfaceY,
+  kindForTheme,
   levelName,
   maxLaunchX,
   speedToWorld,
+  themeFor,
 } from './game/config';
 import { normalizeSettings, powerFromGesture, selectControlledLevel } from './game/core';
 
@@ -792,11 +796,13 @@ export default function Home() {
     reset(settingsRef.current);
   }, [reset]);
 
-  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.1">
+  const visualModeLabel = settings.visualMode === 'art' ? '美術 5.2' : settings.visualMode === 'realtime3d' ? '即時 3D' : '陽春';
+
+  return <main className="app-shell"><section className="game-card" aria-label="果汁杯融合遊戲 V5.2">
     <header className="hud">
       <div className="score-main hud-tile"><small>分數</small><strong>{score.toLocaleString()}</strong><em>最高 {best.toLocaleString()}・零復活 {bestClean.toLocaleString()}</em></div>
       <div className="orders hud-tile"><small>訂單</small><b>{orders}</b><em>累積 {lifetimeOrders}</em></div>
-      <div className="queue hud-tile"><CupPreview label="下一杯" level={queue[0]} theme={settings.theme}/><i>›</i><CupPreview label="再下一杯" level={queue[1]} theme={settings.theme}/></div>
+      <div className="queue hud-tile"><CupPreview label="下一杯" level={queue[0]} theme={settings.theme} visualMode={settings.visualMode}/><i>›</i><CupPreview label="再下一杯" level={queue[1]} theme={settings.theme} visualMode={settings.visualMode}/></div>
       <div className="shots hud-tile"><small>已投</small><b>{shots}</b></div>
       <button className="settings-button" onClick={openSettings} aria-label="開啟設定"><span aria-hidden>⚙</span></button>
     </header>
@@ -807,12 +813,12 @@ export default function Home() {
         dangerLine={dangerLine} bursts={bursts} restoreEpoch={restoreEpoch} safeUntilRef={safeUntilRef}
         onCamera={handleCamera} onCupCollision={handleCupCollision}
         onGameOver={handleGameOver} onRecycle={handleRecycle} onReady={handleSceneReady}/></Suspense></SceneBoundary>}
-      {!sceneReady && <div className="scene-loading"><span/><b>正在準備精品 3D 跑道</b></div>}
+      {!sceneReady && <div className="scene-loading"><span/><b>{settings.visualMode === 'art' ? '正在準備精緻美術跑道' : '正在準備物理跑道'}</b></div>}
       <div className="field-badges">
         {historyCount > 0 && <button onClick={undo} aria-label={`復原上一步，尚有 ${historyCount} 次`}>↶ <small>{historyCount}</small></button>}
         {revives > 0 && <span>復活 {revives}</span>}
         {settings.dynamicDanger && <span className="danger-mode">動態線</span>}
-        <span className="physics-mode">3D 5.1</span>
+        <span className="physics-mode">{visualModeLabel}</span>
       </div>
       {settings.angle && <button className={`aim-state ${aim.locked ? 'locked' : ''}`} onClick={toggleAimLock}>{aim.locked ? '角度已鎖定・點此解鎖' : '拖曳預測線調角度・點此鎖定'}</button>}
       {powerPreview > 0 && <div className="power-meter"><i style={{ height: `${Math.max(8, powerPreview * 100)}%` }}/><span>{settings.power ? '力度' : '有效'}</span></div>}
@@ -820,15 +826,15 @@ export default function Home() {
       {gameOver && <div className="game-over"><small>穩定堆積越過危險線</small><h2>{score.toLocaleString()}</h2><p>本局訂單 {orders}・復活 {revives} 次</p><div>{historyCount > 0 && <button className="undo-action" onClick={undo}>復原</button>}<button onClick={revive}>復活</button><button className="secondary" onClick={() => reset()}>重來</button></div></div>}
     </div>
     <section className="merge-strip"><div className="strip-label"><b>融合</b><small>{unlocked + 1}/7</small></div>
-      {LEVELS.map((level, index) => <div className={`mini-level ${index <= unlocked ? '' : 'future'}`} key={level.name} title={levelName(settings.theme, index)}><CupIcon level={index} theme={settings.theme}/>{index < LEVELS.length - 1 && <i>›</i>}</div>)}
+      {LEVELS.map((level, index) => <div className={`mini-level ${index <= unlocked ? '' : 'future'}`} key={level.name} title={levelName(settings.theme, index)}><CupIcon level={index} theme={settings.theme} visualMode={settings.visualMode}/>{index < LEVELS.length - 1 && <i>›</i>}</div>)}
       <div className="blast-mark" title="最高級爆炸">✦</div>
     </section>
     {settingsOpen && <SettingsSheet settings={settings} close={closeSettings} patch={patchSettings} preset={applyPreset} pause={pauseGame} restart={restartGame}/>}
   </section></main>;
 }
 
-function CupPreview({ label, level, theme }: { label: string; level: number; theme: Theme }) {
-  return <div className={`cup-preview${level >= 2 ? ' lucky' : ''}`}><small>{label}</small><CupIcon level={level} theme={theme}/></div>;
+function CupPreview({ label, level, theme, visualMode }: { label: string; level: number; theme: Theme; visualMode: VisualMode }) {
+  return <div className={`cup-preview${level >= 2 ? ' lucky' : ''}`}><small>{label}</small><CupIcon level={level} theme={theme} visualMode={visualMode}/></div>;
 }
 
 function Toggle({ title, note, value, onChange }: { title: string; note: string; value: boolean; onChange: (value: boolean) => void }) {
@@ -840,8 +846,13 @@ function Slider({ title, value, min, max, step = 1, unit = '', onChange }: { tit
   return <label className="slider-row"><span><b>{title}</b><output>{value.toFixed(precision)}{unit}</output></span><input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))}/></label>;
 }
 
-function ThemeButton({ value, current, title, patch }: { value: Theme; current: Theme; title: string; patch: (patch: Partial<Settings>) => void }) {
-  return <button className={current === value ? 'active' : ''} onClick={() => patch({ theme: value })}><CupIcon level={value.startsWith('premium') ? 6 : 2} theme={value}/><span>{title}</span></button>;
+function ThemeButton({ kind, current, visualMode, title, patch }: { kind: CupKind; current: Theme; visualMode: VisualMode; title: string; patch: (patch: Partial<Settings>) => void }) {
+  const value = themeFor(kind, visualMode);
+  return <button className={kindForTheme(current) === kind ? 'active' : ''} onClick={() => patch({ theme: value })}><CupIcon level={6} theme={value} visualMode={visualMode}/><span>{title}</span></button>;
+}
+
+function VisualModeButton({ value, settings, title, note, patch }: { value: VisualMode; settings: Settings; title: string; note: string; patch: (patch: Partial<Settings>) => void }) {
+  return <button className={settings.visualMode === value ? 'active' : ''} onClick={() => patch({ visualMode: value, theme: themeFor(kindForTheme(settings.theme), value) })}><b>{title}</b><small>{note}</small></button>;
 }
 
 function QualityButton({ value, current, title, note, patch }: { value: GraphicsQuality; current: GraphicsQuality; title: string; note: string; patch: (patch: Partial<Settings>) => void }) {
@@ -851,12 +862,12 @@ function QualityButton({ value, current, title, note, patch }: { value: Graphics
 function SettingsSheet({ settings, close, patch, preset, pause, restart }: { settings: Settings; close: () => void; patch: (patch: Partial<Settings>) => void; preset: (kind: 'stable' | 'balanced' | 'extreme') => void; pause: () => void; restart: () => void }) {
   const [confirmRestart, setConfirmRestart] = useState(false);
   return <div className="modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) close(); }}><section className="settings-sheet" role="dialog" aria-modal="true" aria-label="遊戲設定">
-    <header><div><small>遊戲設定</small><h2>玩法、3D 與手感</h2></div><button onClick={close} aria-label="關閉設定">×</button></header>
+    <header><div><small>遊戲設定</small><h2>玩法、外觀與手感</h2></div><button onClick={close} aria-label="關閉設定">×</button></header>
     <div className="sheet-scroll">
       <div className="theme-picker">
-        <ThemeButton value="premiumJuice" current={settings.theme} title="精品果汁吧" patch={patch}/><ThemeButton value="premiumSundae" current={settings.theme} title="聖代工房" patch={patch}/><ThemeButton value="premiumWine" current={settings.theme} title="水晶酒窖" patch={patch}/>
-        <ThemeButton value="simpleJuice" current={settings.theme} title="果汁陽春" patch={patch}/><ThemeButton value="simpleSundae" current={settings.theme} title="聖代陽春" patch={patch}/><ThemeButton value="simpleWine" current={settings.theme} title="酒杯陽春" patch={patch}/>
+        <ThemeButton kind="juice" current={settings.theme} visualMode={settings.visualMode} title="果汁珍藏" patch={patch}/><ThemeButton kind="sundae" current={settings.theme} visualMode={settings.visualMode} title="聖代工房" patch={patch}/><ThemeButton kind="wine" current={settings.theme} visualMode={settings.visualMode} title="銀河酒窖" patch={patch}/>
       </div>
+      <div className="visual-mode-picker"><VisualModeButton value="art" settings={settings} title="精緻預渲染" note="推薦・V4.6 美術" patch={patch}/><VisualModeButton value="realtime3d" settings={settings} title="即時 3D" note="V5.1 實驗模式" patch={patch}/><VisualModeButton value="simple" settings={settings} title="陽春" note="清楚、省電" patch={patch}/></div>
       <div className="quality-picker"><QualityButton value="eco" current={settings.quality} title="省電" note="較低畫質" patch={patch}/><QualityButton value="balanced" current={settings.quality} title="平衡" note="手機預設" patch={patch}/><QualityButton value="cinematic" current={settings.quality} title="電影" note="完整光影" patch={patch}/></div>
       <div className="setting-group">
         <Toggle title="動態危險線" note="未融合會推進，融合與訂單會退回" value={settings.dynamicDanger} onChange={(value) => patch({ dynamicDanger: value })}/>
@@ -864,7 +875,7 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Toggle title="動態防手抖" note="直線模式達到距離後，隱形固定發射起點" value={settings.straightStabilizer} onChange={(value) => patch({ straightStabilizer: value })}/>
         {settings.straightStabilizer && <Slider title="防手抖觸發距離" value={settings.straightLockDistance} min={0} max={40} step={1} unit="px" onChange={(value) => patch({ straightLockDistance: value })}/>}
         <Toggle title="力度控制" note="滑動距離 70%＋末段速度 30%，角度不受出手微操影響" value={settings.power} onChange={(value) => patch({ power: value })}/>
-        <Toggle title="顯示杯子等級" note="在 3D 杯身顯示 1～7" value={settings.levels} onChange={(value) => patch({ levels: value })}/>
+        <Toggle title="顯示杯子等級" note="在杯身顯示 1～7" value={settings.levels} onChange={(value) => patch({ levels: value })}/>
         <Toggle title="杯口辨識光環" note="協助辨認被前排遮住的杯子，可自由關閉" value={settings.occlusionCues} onChange={(value) => patch({ occlusionCues: value })}/>
         <Toggle title="顯示反彈路徑" note="以跑道尺寸、斜坡與反彈參數預測" value={settings.bounces} onChange={(value) => patch({ bounces: value })}/>
         <Toggle title="音效" note="投擲、融合與爆炸音效" value={settings.sound} onChange={(value) => patch({ sound: value })}/>
@@ -874,9 +885,9 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="最大力度" value={settings.maxPower} min={6} max={25} step={0.1} onChange={(value) => patch({ maxPower: Math.max(value, settings.minPower + 0.1) })}/>
         <Slider title="投擲有效距離" value={settings.throwThreshold} min={30} max={100} step={5} unit="px" onChange={(value) => patch({ throwThreshold: value })}/>
       </div>
-      <details className="developer"><summary>開發者專區 <span>即時調整真 3D 手感</span></summary>
-        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.1 預設</button></div>
-        <Toggle title="顯示 3D 碰撞體" note="直接顯示 Rapier 的杯身、護欄、跑道與前牆" value={settings.debugHitboxes} onChange={(value) => patch({ debugHitboxes: value })}/>
+      <details className="developer"><summary>開發者專區 <span>即時調整 V5 物理手感</span></summary>
+        <div className="presets"><button onClick={() => preset('stable')}>穩定堆積</button><button onClick={() => preset('balanced')}>預設手感</button><button onClick={() => preset('extreme')}>極限高彈</button><button onClick={() => patch(DEFAULTS)}>恢復 V5.2 預設</button></div>
+        <Toggle title="顯示碰撞骨架" note="將杯身、護欄、跑道與前牆疊在美術畫面上檢查對位" value={settings.debugHitboxes} onChange={(value) => patch({ debugHitboxes: value })}/>
         <Slider title="最大角度" value={settings.maxAngle} min={30} max={85} unit="°" onChange={(value) => patch({ maxAngle: value })}/>
         <Slider title="固定力量" value={settings.fixedSpeed} min={5.5} max={14} step={0.1} onChange={(value) => patch({ fixedSpeed: value })}/>
         <Slider title="左右護欄反彈" value={settings.wallRest} min={0.1} max={0.99} step={0.01} onChange={(value) => patch({ wallRest: value })}/>
@@ -897,7 +908,11 @@ function SettingsSheet({ settings, close, patch, preset, pause, restart }: { set
         <Slider title="融合安定時間" value={settings.mergeSettleMs} min={0} max={400} step={10} unit="ms" onChange={(value) => patch({ mergeSettleMs: value })}/>
         <Slider title="危險線深入比例" value={settings.dangerPenetration} min={0.1} max={0.8} step={0.02} onChange={(value) => patch({ dangerPenetration: value })}/>
         <Slider title="高速回收門檻" value={settings.returnSpeed} min={0.2} max={4} step={0.1} onChange={(value) => patch({ returnSpeed: value })}/>
-        <Slider title="攝影機高度" value={settings.cameraHeight} min={9.5} max={16} step={0.1} onChange={(value) => patch({ cameraHeight: value })}/>
+        {settings.visualMode === 'art'
+          ? <p className="art-camera-note">精緻預渲染使用固定美術攝影機，確保護欄、前牆與碰撞位置一致。</p>
+          : (
+            <Slider title="攝影機高度" value={settings.cameraHeight} min={9.5} max={16} step={0.1} onChange={(value) => patch({ cameraHeight: value })}/>
+          )}
         <Slider title="整體杯子尺寸（即時）" value={settings.size} min={0.55} max={2.2} step={0.01} onChange={(value) => patch({ size: value })}/>
         <details className="level-sizes"><summary>各級 3D 杯身與碰撞比例 <span>立即生效</span></summary><div>{settings.levelSizes.map((value, index) => <Slider key={index} title={`等級 ${index + 1} 比例`} value={value} min={0.55} max={3.8} step={0.01} onChange={(nextValue) => { const next = [...settings.levelSizes]; next[index] = nextValue; patch({ levelSizes: next }); }}/>)}</div></details>
         <Slider title="穩定堆積結束等待" value={settings.gameOverMs} min={500} max={3000} step={100} unit="ms" onChange={(value) => patch({ gameOverMs: value })}/>

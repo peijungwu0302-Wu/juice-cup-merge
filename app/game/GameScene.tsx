@@ -15,6 +15,7 @@ import { MutableRefObject, Suspense, useCallback, useEffect, useMemo, useRef } f
 import * as THREE from 'three';
 import {
   AimState,
+  ART_ASSET,
   BurstState,
   CUP_COLLIDER_SLICES,
   CupState,
@@ -62,19 +63,22 @@ function qualityDpr(quality: GraphicsQuality): [number, number] {
   return [1, 1.45];
 }
 
-function CameraRig({ height, onCamera }: { height: number; onCamera: SceneProps['onCamera'] }) {
+function CameraRig({ height, visualMode, onCamera }: { height: number; visualMode: Settings['visualMode']; onCamera: SceneProps['onCamera'] }) {
   const { camera, size } = useThree();
   useEffect(() => {
     if (!(camera instanceof THREE.PerspectiveCamera)) return;
-    camera.position.set(0, height, 19);
-    camera.fov = size.width / Math.max(1, size.height) < 0.7 ? 45 : 39;
+    const artMode = visualMode === 'art';
+    camera.position.set(0, artMode ? ART_ASSET.lane.cameraHeight : height, 19);
+    camera.fov = size.width / Math.max(1, size.height) < 0.7
+      ? (artMode ? ART_ASSET.lane.portraitFov : 45)
+      : (artMode ? ART_ASSET.lane.wideFov : 39);
     camera.near = 0.1;
     camera.far = 80;
     camera.lookAt(0, -0.1, -1);
     camera.updateProjectionMatrix();
     onCamera(camera);
     return () => onCamera(null);
-  }, [camera, height, onCamera, size.height, size.width]);
+  }, [camera, height, onCamera, size.height, size.width, visualMode]);
   return null;
 }
 
@@ -351,6 +355,7 @@ function CupBody({
     />)}
     <CupModel3D
       theme={settings.theme}
+      visualMode={settings.visualMode}
       level={cup.level}
       radius={radius}
       height={height}
@@ -522,16 +527,20 @@ function PreviewCup({ level, aim, settings }: { level: number; aim: AimState; se
       <ringGeometry args={[radius * 0.9, radius * 1.14, 36]}/><meshBasicMaterial color="#fff4c5" transparent opacity={0.28} depthWrite={false}/>
     </mesh>
     <CupModel3D theme={settings.theme} level={level} radius={radius} height={height}
-      showLevel={settings.levels} showHalo={settings.occlusionCues} quality={settings.quality} preview/>
+      visualMode={settings.visualMode} showLevel={settings.levels} showHalo={settings.occlusionCues} quality={settings.quality} preview/>
   </group>;
 }
 
 function World({ props }: { props: SceneProps }) {
   return <>
-    <EnvironmentSet quality={props.settings.quality}/>
-    <CameraRig height={props.settings.cameraHeight} onCamera={props.onCamera}/>
+    {props.settings.visualMode !== 'art' && (
+      <EnvironmentSet quality={props.settings.quality}/>
+    )}
+    <CameraRig height={props.settings.cameraHeight} visualMode={props.settings.visualMode} onCamera={props.onCamera}/>
     <Suspense fallback={null}>
-      <LaneVisual slope={props.settings.slope}/>
+      {props.settings.visualMode !== 'art' && (
+        <LaneVisual slope={props.settings.slope}/>
+      )}
       <Physics
         gravity={[0, -9.81, 0]}
         paused={props.paused || props.gameOver}
@@ -568,16 +577,17 @@ function World({ props }: { props: SceneProps }) {
 
 export function GameScene(props: SceneProps) {
   return <Canvas
-    className="v5-canvas"
+    className={`v5-canvas visual-${props.settings.visualMode}`}
     dpr={qualityDpr(props.settings.quality)}
-    shadows={props.settings.quality !== 'eco'}
+    shadows={props.settings.visualMode !== 'art' && props.settings.quality !== 'eco'}
     camera={{ position: [0, props.settings.cameraHeight, 19], fov: 45, near: 0.1, far: 80 }}
-    gl={{ antialias: props.settings.quality !== 'eco', alpha: false, powerPreference: 'high-performance' }}
+    gl={{ antialias: props.settings.quality !== 'eco', alpha: true, powerPreference: 'high-performance' }}
     onCreated={({ gl, camera }) => {
       gl.outputColorSpace = THREE.SRGBColorSpace;
       gl.toneMapping = THREE.ACESFilmicToneMapping;
       gl.toneMappingExposure = 1.08;
       gl.shadowMap.type = THREE.PCFShadowMap;
+      gl.setClearColor(0x000000, 0);
       if (camera instanceof THREE.PerspectiveCamera) props.onCamera(camera);
     }}
   >
